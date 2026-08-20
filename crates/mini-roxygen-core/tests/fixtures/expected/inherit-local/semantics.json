@@ -1,0 +1,9 @@
+{
+  "topics": [
+    {"name": "inherit_donor", "aliases": ["inherit_donor"], "parameters": ["x", "y"], "usage": "inherit_donor(x, y)"},
+    {"name": "inherit_middle", "aliases": ["inherit_middle"], "parameters": ["x", "y"], "usage": "inherit_middle(x, y)"},
+    {"name": "inherit_target", "aliases": ["inherit_target"], "parameters": ["x", "y"], "usage": "inherit_target(x, y)"}
+  ],
+  "namespace_directives": [],
+  "notes": []
+}

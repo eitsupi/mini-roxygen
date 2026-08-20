@@ -1,0 +1,7 @@
+Package: markdownRd
+Version: 0.0.1
+Title: Markdown documentation fixture
+Description: A minimal package used to exercise Markdown conversion.
+License: MIT
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)

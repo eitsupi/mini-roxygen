@@ -1,0 +1,8 @@
+---
+source: crates/mini-roxygen-core/tests/package_fixture.rs
+expression: rendered
+---
+error missing-topic-title R/04-failing.R[99..113]: topic `untitled` has no title
+warning missing-param R/02-shared-first.R[365..370]: parameter `value` is not documented
+warning missing-param R/03-shared-second.R[428..429]: parameter `x` is not documented
+warning missing-param R/03-shared-second.R[431..434]: parameter `...` is not documented

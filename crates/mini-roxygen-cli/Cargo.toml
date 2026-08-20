@@ -1,0 +1,32 @@
+[package]
+name = "mini-roxygen-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+description = "roxy: generate R package Rd documentation and NAMESPACE without evaluating R code"
+keywords = ["r", "roxygen", "documentation", "rd", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "roxy"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+mini-roxygen-core.workspace = true
+rd-ast = { workspace = true, features = ["rds"] }
+rd-helpdb.workspace = true
+rd-rds.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+# Writer tests construct GeneratedRd, which carries an rd-ast document.
+insta.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# Plain `cargo run`/`cargo build` target the binary. Test and lint invocations
+# pass --workspace explicitly so they still cover every crate.
+default-members = ["crates/mini-roxygen-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/eitsupi/mini-roxygen"
+homepage = "https://github.com/eitsupi/mini-roxygen"
+readme = "README.md"
+
+[workspace.dependencies]
+arity-formatter = "0.4.1"
+arity-parser = "0.5.1"
+clap = { version = "4", features = ["derive"] }
+insta = { version = "1.48.0", default-features = false }
+pulldown-cmark = "0.13.1"
+rd-ast = "0.4.0"
+rd-writer = "0.4.0"
+rd-helpdb = "0.4.0"
+rd-rds = "0.4.0"
+rd-source = "0.4.0"
+serde_json = "1"
+tempfile = "3"
+toml = "1.1"
+unicode-width = "0.2.2"
+# The version requirement is what makes the CLI publishable: a path-only
+# dependency cannot be packaged. Keep it in step with workspace.package.version.
+mini-roxygen-core = { path = "crates/mini-roxygen-core", version = "=0.1.0" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+# Allow-by-default, so neither `clippy -D warnings` nor the test suite catches a
+# type that stays reachable through a public field while its module goes
+# private. That regression has already happened once.
+unnameable_types = "warn"
+
+[workspace.lints.clippy]
+all = "warn"

@@ -1,0 +1,29 @@
+[package]
+name = "mini-roxygen-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+description = "Static generation of R package Rd documentation and NAMESPACE from roxygen comments"
+keywords = ["r", "roxygen", "documentation", "rd", "codegen"]
+categories = ["development-tools", "parser-implementations", "text-processing"]
+
+[dependencies]
+arity-formatter.workspace = true
+arity-parser.workspace = true
+pulldown-cmark.workspace = true
+rd-ast.workspace = true
+rd-writer.workspace = true
+rd-source.workspace = true
+unicode-width.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

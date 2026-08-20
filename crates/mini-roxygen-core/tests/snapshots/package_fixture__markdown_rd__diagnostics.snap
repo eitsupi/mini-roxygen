@@ -1,0 +1,5 @@
+---
+source: crates/mini-roxygen-core/tests/package_fixture.rs
+expression: rendered
+---
+error undefined-inline-r-substitution R/04-failing.R[162..171]: no substitution is defined for inline R expression

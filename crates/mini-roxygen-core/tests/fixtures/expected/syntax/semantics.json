@@ -1,0 +1,15 @@
+{
+  "topics": [
+    {"name": "RenderOptions", "aliases": ["RenderOptions", "new_render_options"], "parameters": ["...", "compact"], "usage": "new_render_options(..., compact = TRUE)"},
+    {"name": "new_label_style", "aliases": ["LabelStyle", "label_style_scheme", "new_label_style"], "parameters": ["separator", "template"], "usage": "new_label_style(template, ..., separator = NULL)"},
+    {"name": "lambda_fixture", "aliases": ["lambda_fixture"], "parameters": ["x"], "usage": "lambda_fixture(x)"},
+    {"name": "raw_rd_fixture", "aliases": ["raw_rd_fixture"], "parameters": [], "usage": "raw_rd_fixture()"},
+    {"name": "signature_fixture", "aliases": ["signature_fixture"], "parameters": ["...", "x", "y"], "usage": "signature_fixture( x, y = { x + 1 }, ... )"},
+    {"name": "standalone_fixture", "aliases": ["standalone_alias", "standalone_fixture"], "parameters": [], "usage": null}
+  ],
+  "namespace_directives": [
+    "export(lambda_fixture)",
+    "export(signature_fixture)"
+  ],
+  "notes": ["markdown_config_false_is_ignored_and_markdown_is_always_enabled"]
+}

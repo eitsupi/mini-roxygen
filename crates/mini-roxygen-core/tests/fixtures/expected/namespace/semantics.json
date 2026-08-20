@@ -1,0 +1,15 @@
+{
+  "topics": [
+    {"name": "explicit_export", "aliases": ["explicit_export"], "parameters": [], "usage": "explicit_export(x)"},
+    {"name": "implicit_export", "aliases": ["implicit_export"], "parameters": [], "usage": "implicit_export(x)"},
+    {"name": "namespace_match", "aliases": ["namespace_match"], "parameters": [], "usage": "namespace_match(x, table)"},
+    {"name": "namespace_target", "aliases": ["namespace_target"], "parameters": [], "usage": "namespace_target(x)"}
+  ],
+  "namespace_directives": [
+    "export(explicit_export_name)",
+    "export(implicit_export)",
+    "import(stats)",
+    "importFrom(utils,head,match,tail)"
+  ],
+  "notes": []
+}

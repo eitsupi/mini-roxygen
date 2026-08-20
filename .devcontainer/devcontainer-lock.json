@@ -1,0 +1,14 @@
+{
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "1.5.1",
+      "resolved": "ghcr.io/devcontainers/features/rust@sha256:f7afd923fd283db88ca961342ae65ea63a8c95bcf86e42c4c363f43bc4ba26a5",
+      "integrity": "sha256:f7afd923fd283db88ca961342ae65ea63a8c95bcf86e42c4c363f43bc4ba26a5"
+    },
+    "ghcr.io/rocker-org/devcontainer-features/r-rig:1": {
+      "version": "1.2.4",
+      "resolved": "ghcr.io/rocker-org/devcontainer-features/r-rig@sha256:38f14bb238ee5e9ced77a4fe9375c459ca30fe32bd138480ed5eba62e1af4db2",
+      "integrity": "sha256:38f14bb238ee5e9ced77a4fe9375c459ca30fe32bd138480ed5eba62e1af4db2"
+    }
+  }
+}

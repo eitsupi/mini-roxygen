@@ -1,0 +1,5 @@
+Package: rdBasic
+Version: 0.0.1
+Title: Basic documentation fixture
+Description: A minimal package used to exercise Rd generation.
+License: MIT

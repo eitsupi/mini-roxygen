@@ -1,0 +1,13 @@
+Package: package.rd
+Title: A Package Topic
+Version: 0.0.1
+Authors@R: c(
+    person("Ada", "Lovelace", , "ada@example.org", role = c("aut", "cre")),
+    person("Grace", "Hopper", role = "aut", comment = c(ORCID = "0000-0000-0000-0000")),
+    person("The Example Project Contributors", role = "aut"),
+    person("Example Foundation", role = c("cph", "fnd"))
+  )
+Description: A package description.
+URL: https://example.org, https://example.org/docs, https://example.org/project
+BugReports: https://example.org/issues
+Encoding: UTF-8

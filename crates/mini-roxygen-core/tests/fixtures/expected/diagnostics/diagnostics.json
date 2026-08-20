@@ -1,0 +1,5 @@
+[
+  {"code": "inherit-cycle", "severity": "error", "file": "R/01-cycle.R", "start": 25, "end": 59},
+  {"code": "missing-param", "severity": "warning", "file": "R/02-missing-param.R", "start": 132, "end": 144},
+  {"code": "undefined-inline-r-substitution", "severity": "error", "file": "R/03-inline-r.R", "start": 67, "end": 76}
+]

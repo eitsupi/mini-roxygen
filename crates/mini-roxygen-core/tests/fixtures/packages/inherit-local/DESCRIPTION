@@ -1,0 +1,8 @@
+Package: inheritlocal
+Type: Package
+Title: Local inheritance integration fixture
+Version: 0.0.1
+Authors@R: person("Fixture", "Author", email = "fixture@example.org", role = c("aut", "cre"))
+Description: A package fixture for local and recursive inheritance.
+License: MIT
+Encoding: UTF-8
