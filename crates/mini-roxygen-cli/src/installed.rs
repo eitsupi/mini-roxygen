@@ -402,8 +402,11 @@ mod tests {
             |_| warning.path.clone(),
             |relative| Path::new("/fixture").join(relative),
         );
+        let path = path
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         render_warning(&MetadataWarning {
-            path,
+            path: path.into(),
             message: warning.message.clone(),
         })
     }

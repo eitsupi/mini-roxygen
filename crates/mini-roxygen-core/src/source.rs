@@ -696,7 +696,7 @@ mod tests {
         let directory = TempDirectory::new();
         let r_directory = directory.path().join("R");
         fs::create_dir(&r_directory).expect("R directory should be creatable");
-        for name in ["b.R", "a.R", "A.r", "notes.txt"] {
+        for name in ["b.R", "a.R", "C.r", "notes.txt"] {
             fs::write(r_directory.join(name), "x").expect("fixture should be writable");
         }
         fs::create_dir(r_directory.join("sub")).expect("subdirectory should be creatable");
@@ -707,7 +707,7 @@ mod tests {
             .iter()
             .map(|path| path.file_name().expect("fixture has a filename"))
             .collect();
-        assert_eq!(names, ["A.r", "a.R", "b.R"]);
+        assert_eq!(names, ["C.r", "a.R", "b.R"]);
     }
 
     #[test]

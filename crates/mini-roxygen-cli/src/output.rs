@@ -686,8 +686,11 @@ fn write_entry(root: &Path, entry: &PlannedOutput<'_>) -> Result<(), OutputError
         source,
     })?;
 
+    #[cfg(unix)]
     let destination_metadata =
         check_destination_before_write(&destination, entry.content, entry.action)?;
+    #[cfg(not(unix))]
+    check_destination_before_write(&destination, entry.content, entry.action)?;
 
     #[cfg(unix)]
     if entry.action == OutputAction::Replace
