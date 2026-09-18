@@ -140,7 +140,7 @@ fn find_base_package(library_paths: &[PathBuf]) -> Option<PathBuf> {
     library_paths
         .iter()
         .map(|library| library.join("base"))
-        .find(|path| path.is_dir() && package_metadata_path(path).is_file())
+        .find(|path| path.is_dir())
 }
 
 fn fallback_message(version: Option<&str>, reason: &str) -> String {
@@ -649,6 +649,10 @@ mod tests {
         .expect("malformed metadata");
         let (_, warnings) = select_base_catalog(&[library.path().to_owned()]);
         assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].path,
+            library.path().join("base/Meta/package.rds")
+        );
         assert!(
             warnings[0]
                 .message
@@ -657,14 +661,21 @@ mod tests {
     }
 
     #[test]
-    fn base_directory_without_or_unreadable_metadata_falls_back() {
+    fn base_directory_and_metadata_failures_preserve_precedence() {
         let missing = tempdir().expect("library");
         fs::create_dir(missing.path().join("base")).expect("base directory");
-        let (_, missing_warnings) = select_base_catalog(&[missing.path().to_owned()]);
+        let second = base_library(PACKAGE_META_R46);
+        let (missing_minor, missing_warnings) =
+            select_base_catalog(&[missing.path().to_owned(), second.path().to_owned()]);
+        assert_eq!(missing_minor, SupportedRMinor::R4_6);
+        assert_eq!(
+            missing_warnings[0].path,
+            missing.path().join("base/Meta/package.rds")
+        );
         assert!(
             missing_warnings[0]
                 .message
-                .contains("base package was not found")
+                .contains("base/Meta/package.rds could not be read")
         );
 
         let unreadable = tempdir().expect("library");
