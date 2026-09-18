@@ -2,7 +2,12 @@ name: Check
 
 on:
   pull_request:
+    branches:
+      - main
   push:
+    branches:
+      - main
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,9 +21,46 @@ defaults:
     shell: bash
 
 jobs:
-  check:
-    name: Check (${{ matrix.os }})
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust stable
+        run: rustup toolchain install stable --profile minimal --component clippy
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -26,30 +68,183 @@ jobs:
           - ubuntu-latest
           - macos-latest
           - windows-latest
-
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        with:
+          persist-credentials: false
       - name: Set up Rust stable
-        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-
-      - name: Select Rust stable
-        run: rustup default stable
-
+        run: rustup toolchain install stable --profile minimal
       - name: Cache Rust
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features --locked
 
+  msrv:
+    name: MSRV (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install cargo-msrv
+        uses: baptiste0928/cargo-install@f204293d9709061b7bc1756fec3ec4e2cd57dec0 # v3.4.0
+        with:
+          crate: cargo-msrv
+          version: 0.19.3
+      - name: Verify declared MSRV
+        run: |
+          for manifest in crates/mini-roxygen-core/Cargo.toml crates/mini-roxygen-cli/Cargo.toml; do
+            echo "Checking package $manifest"
+            cargo msrv \
+              --manifest-path "$manifest" \
+              --output-format minimal \
+              verify -- \
+              cargo check --manifest-path "$manifest" --all-targets --all-features --locked
+          done
+
+  r-oracle:
+    name: R oracle (R ${{ matrix.r-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        r-version:
+          - '4.5'
+          - '4.6'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up R
+        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
+        with:
+          r-version: ${{ matrix.r-version }}
+          use-public-rspm: true
+          Ncpus: '2'
+      - name: Install R dependencies
+        uses: r-lib/actions/setup-r-dependencies@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
+        with:
+          working-directory: tests/r-deps
+          dependencies: '"hard"'
+      - name: Capture R library paths
+        id: r-libs
+        run: |
+          paths=$(Rscript --vanilla -e 'cat(paste(.libPaths(), collapse = .Platform$path.sep))')
+          test -n "$paths"
+          echo "paths=$paths" >> "$GITHUB_OUTPUT"
+      - name: Set up Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Run required R oracles
+        env:
+          MINI_ROXYGEN_REQUIRE_RD_ORACLE: '1'
+          MINI_ROXYGEN_REQUIRE_FORMALS_ORACLE: '1'
+          MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS: '1'
+          MINI_ROXYGEN_TEST_R_LIB_PATHS: ${{ steps.r-libs.outputs.paths }}
+        run: cargo test --workspace --all-targets --all-features --locked
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust stable
+        run: rustup toolchain install stable --profile minimal
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+
+  deny:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check dependency policy
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+          arguments: --all-features
+          command-arguments: ''
+
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Lint workflows
+        run: "$(go env GOPATH)/bin/actionlint"
+
+  required:
+    name: Required checks
+    if: ${{ always() }}
+    needs:
+      - fmt
+      - clippy
+      - test
+      - msrv
+      - r-oracle
+      - docs
+      - deny
+      - workflow-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require every gate to pass
+        env:
+          FMT_RESULT: ${{ needs.fmt.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          MSRV_RESULT: ${{ needs.msrv.result }}
+          R_ORACLE_RESULT: ${{ needs.r-oracle.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          DENY_RESULT: ${{ needs.deny.result }}
+          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
+        run: |
+          printf '%s\n' \
+            "fmt=$FMT_RESULT" \
+            "clippy=$CLIPPY_RESULT" \
+            "test=$TEST_RESULT" \
+            "msrv=$MSRV_RESULT" \
+            "r-oracle=$R_ORACLE_RESULT" \
+            "docs=$DOCS_RESULT" \
+            "deny=$DENY_RESULT" \
+            "workflow-lint=$WORKFLOW_LINT_RESULT"
+          test "$FMT_RESULT" = success
+          test "$CLIPPY_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$MSRV_RESULT" = success
+          test "$R_ORACLE_RESULT" = success
+          test "$DOCS_RESULT" = success
+          test "$DENY_RESULT" = success
+          test "$WORKFLOW_LINT_RESULT" = success

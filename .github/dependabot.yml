@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    commit-message:
+      prefix: "chore: "
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      patch:
+        update-types:
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    commit-message:
+      prefix: "ci: "
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: devcontainers
+    directory: /
+    commit-message:
+      prefix: "build(devcontainer): "
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
