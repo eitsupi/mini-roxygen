@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct the stated minimum supported Rust version from 1.88 to 1.89:
+  `arity-parser` 0.5.1 resolves `smol_str` 0.3.6, so the 0.1.0 dependency
+  graph already required Rust 1.89.
+
 ## [0.1.0] - 2026-08-20
 
 ### Added
