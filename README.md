@@ -114,14 +114,14 @@ optional metadata file is treated as local-only information, while malformed
 metadata is reported as a warning.
 
 The supported catalog versions are R 4.5 and R 4.6. The catalog is selected
-based on the major.minor version in `base/DESCRIPTION`, so a 4.5.x
-installation uses the 4.5 catalog and a 4.6.x installation uses the 4.6
-one.
-Patch releases use the catalog for their corresponding major.minor version.
-If no library path is supplied, `base` is missing, or the detected version
-is unknown, older, newer, or unparseable, the command warns and uses R 4.6
-semantics as a fallback. The warning includes the detected version when one is
-available, so the fallback stays visible in automated builds.
+by decoding `base/Meta/package.rds` and reading the major.minor version from
+its typed `Built.R` field, so patch releases use the catalog for their
+corresponding major.minor version.
+If no library path is supplied, `base` is missing, the metadata is
+missing, unreadable, or undecodable, `Built.R` is missing, or its version is
+older or newer than supported, the command warns and uses R 4.6 semantics as
+a fallback. The warning includes the detected version when one is available,
+so the fallback stays visible in automated builds.
 
 ## Compatibility with roxygen2
 

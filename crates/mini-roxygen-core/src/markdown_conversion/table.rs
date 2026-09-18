@@ -171,7 +171,7 @@ fn marker(tag: RdTag, anchor: Option<Span>) -> NodeWithOrigin {
 
 #[cfg(test)]
 mod tests {
-    use rd_ast::{RdNode, RdPath, RdPathSegment, RdTag};
+    use rd_ast::{RdAstPath, RdAstPathSegment, RdDocument, RdNode, RdTag};
 
     use super::super::test_support::{assert_serialized_body, context, value};
     use super::super::{MarkdownConversion, convert_markdown};
@@ -193,10 +193,18 @@ mod tests {
             .children()
     }
 
-    fn view(conversion: &MarkdownConversion) -> rd_ast::RdTabular<'_> {
-        table(conversion)
-            .inspect_tabular(&RdPath::new(vec![RdPathSegment::TopLevel(0)]))
+    fn view(conversion: &MarkdownConversion) -> RdDocument {
+        RdDocument::new(conversion.fragment.nodes.clone())
+    }
+
+    fn tabular(document: &RdDocument) -> rd_ast::RdTabular<'_> {
+        document
+            .top_level()
+            .get(0)
+            .expect("table root")
+            .inspect_tabular()
             .expect("valid tabular shape")
+            .expect("table root")
     }
 
     #[test]
@@ -226,7 +234,8 @@ mod tests {
             )]
         );
         assert!(conversion.diagnostics.is_empty());
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         assert_eq!(inspected.columns().len(), 2);
         assert_eq!(inspected.rows().len(), 3);
         assert!(
@@ -253,25 +262,27 @@ mod tests {
     #[test]
     fn header_only_table_is_an_ordinary_first_row() {
         let conversion = convert("| A | B |\n| --- | --- |");
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         assert_eq!(inspected.rows().len(), 2);
         assert_eq!(inspected.rows()[0].cells().len(), 2);
         assert!(matches!(body(&conversion)[4], RdNode::Tagged(_)));
     }
 
-    fn cell_path(body_index: usize) -> RdPath {
-        RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Child(1),
-            RdPathSegment::Child(body_index),
+    fn cell_path(body_index: usize) -> RdAstPath {
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Child(1),
+            RdAstPathSegment::Child(body_index),
         ])
     }
 
     #[test]
     fn leading_empty_cell_uses_the_first_body_anchor() {
         let conversion = convert("| A | B |\n| --- | --- |\n| | C |");
-        let inspected = view(&conversion);
-        assert_eq!(inspected.rows()[1].cells()[0].path(), &cell_path(5));
+        let document = view(&conversion);
+        let inspected = tabular(&document);
+        assert_eq!(inspected.rows()[1].cells()[0].anchor_path(), &cell_path(5));
         assert_eq!(
             inspected.rows()[1].cells()[0].nodes(),
             &[RdNode::Text("\n".into()), RdNode::Text("    ".into())]
@@ -281,8 +292,9 @@ mod tests {
     #[test]
     fn middle_empty_cell_uses_the_separator_after_the_first_cell() {
         let conversion = convert("| A | B | C |\n| --- | --- | --- |\n| a | | c |");
-        let inspected = view(&conversion);
-        assert_eq!(inspected.rows()[1].cells()[1].path(), &cell_path(10));
+        let document = view(&conversion);
+        let inspected = tabular(&document);
+        assert_eq!(inspected.rows()[1].cells()[1].anchor_path(), &cell_path(10));
         assert_eq!(
             inspected.rows()[1].cells()[1].nodes(),
             &[RdNode::Text("  ".into())]
@@ -292,8 +304,9 @@ mod tests {
     #[test]
     fn trailing_empty_cell_uses_the_row_end_anchor() {
         let conversion = convert("| A | B |\n| --- | --- |\n| a | |");
-        let inspected = view(&conversion);
-        assert_eq!(inspected.rows()[1].cells()[1].path(), &cell_path(8));
+        let document = view(&conversion);
+        let inspected = tabular(&document);
+        assert_eq!(inspected.rows()[1].cells()[1].anchor_path(), &cell_path(8));
         assert_eq!(
             inspected.rows()[1].cells()[1].nodes(),
             &[RdNode::Text("  ".into())]
@@ -303,7 +316,8 @@ mod tests {
     #[test]
     fn an_entirely_empty_row_keeps_each_empty_cell() {
         let conversion = convert("| A | B |\n| --- | --- |\n| | |");
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         assert_eq!(inspected.rows()[1].cells().len(), 2);
         assert!(inspected.rows()[1].cells().iter().all(|cell| {
             matches!(cell.nodes().last(), Some(RdNode::Text(text)) if text.ends_with(' '))
@@ -315,7 +329,8 @@ mod tests {
         let conversion = convert(
             "| *em* | **strong** | [link](url) | `x + 1` | `a % { }` |\n| --- | --- | --- | --- | --- |\n| *e* | **s** | [l](url) | `y` | `b % { }` |",
         );
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         let row = &inspected.rows()[1];
         let first_tag = |nodes: &[RdNode]| {
             nodes
@@ -341,7 +356,8 @@ mod tests {
             "| --- |\n",
             r"| \eqn{y^2} |"
         ));
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         let row = &inspected.rows()[1];
         assert!(row.cells()[0].nodes().iter().any(|node| {
             node.as_tagged()
@@ -404,7 +420,8 @@ mod tests {
         // Anything after the last `\cr` reads back as a further row, so the
         // row count is the assertion that pins the newline's placement.
         let conversion = convert("| A |\n| --- |\n| B |\n| C |");
-        let inspected = view(&conversion);
+        let document = view(&conversion);
+        let inspected = tabular(&document);
         assert_eq!(inspected.rows().len(), 4);
         assert!(
             inspected

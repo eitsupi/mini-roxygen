@@ -336,7 +336,7 @@ mod tests {
         );
 
         let document = RdDocument::from(nodes);
-        let header = document.generation_header().unwrap();
+        let header = document.generation_header_lossy().unwrap();
         assert_eq!(
             header.generator(),
             Some(&rd_ast::RdGenerator::Unknown(GENERATOR_NAME.to_owned()))

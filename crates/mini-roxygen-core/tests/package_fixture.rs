@@ -251,29 +251,36 @@ fn ast_text(nodes: &[RdNode]) -> String {
 }
 
 fn normalized_topic(document: &RdDocument) -> Value {
-    let name = document.name().map(ast_text).unwrap_or_default();
+    let name = document
+        .inspect_name()
+        .unwrap_or_else(|error| panic!(r"strict \name inspection failed: {error}"))
+        .map(|field| ast_text(field.body()))
+        .unwrap_or_default();
     let mut aliases = document
-        .nodes()
-        .iter()
-        .filter_map(|node| match node {
-            RdNode::Tagged(tagged) if tagged.tag() == &RdTag::Alias => {
-                Some(ast_text(tagged.children()))
-            }
-            _ => None,
+        .inspect_aliases()
+        .map(|alias| {
+            alias
+                .unwrap_or_else(|error| panic!(r"strict \alias inspection failed: {error}"))
+                .text_contents_lossy()
         })
         .collect::<Vec<_>>();
     let mut parameters = document
-        .arguments()
+        .inspect_arguments()
+        .unwrap_or_else(|error| panic!(r"strict \arguments inspection failed: {error}"))
+        .map(|argument| {
+            argument.unwrap_or_else(|error| panic!(r"strict \item inspection failed: {error}"))
+        })
         .flat_map(|argument| {
-            ast_text(argument.name)
+            ast_text(argument.name())
                 .split(',')
                 .map(|name| name.trim().to_owned())
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
     let usage = document
-        .usage()
-        .map(ast_text)
+        .inspect_usage()
+        .unwrap_or_else(|error| panic!(r"strict \usage inspection failed: {error}"))
+        .map(|field| ast_text(field.body()))
         .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "));
     aliases.sort();
     aliases.dedup();

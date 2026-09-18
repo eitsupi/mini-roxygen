@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rd_ast::{RdDocument, RdNode, RdPath, RdPathSegment, RdTag};
+use rd_ast::{RdAstPath, RdAstPathSegment, RdDocument, RdNode, RdTag};
 
 use crate::inherit::{DocumentationOrigin, ResolvedContent};
 use crate::source::Span;
@@ -468,47 +468,31 @@ pub(crate) struct OriginMap {
     nodes: BTreeMap<NodeId, RdNode>,
 }
 
-/// Finds the nearest source origin for a canonical writer path. Node edges are
-/// normalized into the internal path representation; known non-node suffixes
-/// terminate that lookup, while malformed or unknown segments are rejected.
-pub(crate) fn span_for_path(map: &OriginMap, path: &RdPath) -> Option<Span> {
+/// Finds the nearest source origin for a canonical writer path.
+pub(crate) fn span_for_path(map: &OriginMap, path: &RdAstPath) -> Option<Span> {
     let mut normalized = Vec::new();
-    let mut terminal = false;
     let segments = path.segments();
-    let mut position = 0;
-    while position < segments.len() {
-        let segment = &segments[position];
+    for (position, segment) in segments.iter().enumerate() {
         match segment {
-            RdPathSegment::TopLevel(index) if position == 0 => {
-                if terminal {
-                    return None;
-                }
+            RdAstPathSegment::TopLevel(index) if position == 0 => {
                 normalized.push(OriginPathSegment::Child(*index));
             }
-            RdPathSegment::Child(index) if position > 0 => {
-                if terminal {
-                    return None;
-                }
+            RdAstPathSegment::Child(index) if position > 0 => {
                 normalized.push(OriginPathSegment::Child(*index));
             }
-            RdPathSegment::Option => {
-                if terminal
+            RdAstPathSegment::Option => {
+                if position == 0
                     || !matches!(
                         segments.get(position + 1),
-                        None | Some(RdPathSegment::Child(_))
+                        None | Some(RdAstPathSegment::Child(_))
                     )
                 {
                     return None;
                 }
                 normalized.push(OriginPathSegment::Option);
             }
-            RdPathSegment::Attribute(_)
-            | RdPathSegment::AttributeValue
-            | RdPathSegment::ListElement(_)
-            | RdPathSegment::CharacterElement(_) => terminal = true,
             _ => return None,
         }
-        position += 1;
     }
     let bare_option = normalized.last() == Some(&OriginPathSegment::Option)
         && map.option_paths.contains(&normalized);
