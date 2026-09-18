@@ -9,6 +9,12 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      arity:
+        patterns:
+          - "arity-*"
+      rd:
+        patterns:
+          - "rd-*"
       patch:
         update-types:
           - patch
