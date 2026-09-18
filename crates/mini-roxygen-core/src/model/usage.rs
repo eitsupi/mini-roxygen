@@ -16,21 +16,30 @@ pub(in crate::model) fn resolve_formal_names(
     s7_class: Option<&S7ClassFact>,
     alias_formals: Option<&FormalNames>,
 ) -> FormalNames {
-    let function = match target {
-        BlockTarget::FunctionAssignment(function) => function,
+    if let (
         BlockTarget::ValueAssignment(ValueObject {
             value:
                 NonFunctionValue::Name(_)
                 | NonFunctionValue::S7Class(_)
                 | NonFunctionValue::S7Refused(_),
             ..
-        }) if let Some(class) = s7_class => {
-            return formal_names_from_formals(&class.constructor.formals, class.class_name.span);
-        }
+        }),
+        Some(class),
+    ) = (target, s7_class)
+    {
+        return formal_names_from_formals(&class.constructor.formals, class.class_name.span);
+    }
+
+    let function = match target {
+        BlockTarget::FunctionAssignment(function) => function,
         BlockTarget::ValueAssignment(ValueObject {
             value: NonFunctionValue::Name(_),
             ..
         }) => return alias_formals.cloned().unwrap_or(FormalNames::NotFunction),
+        BlockTarget::ValueAssignment(ValueObject {
+            value: NonFunctionValue::S7Class(_) | NonFunctionValue::S7Refused(_),
+            ..
+        }) => return FormalNames::NotFunction,
         _ => return FormalNames::NotFunction,
     };
 

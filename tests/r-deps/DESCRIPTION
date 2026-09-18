@@ -1,0 +1,7 @@
+Package: mini.roxygen.ci.dependencies
+Type: Package
+Title: Dependencies for mini-roxygen CI integration tests
+Version: 0.0.1
+Description: Installs the R packages used by mini-roxygen's installed documentation tests.
+Imports:
+    rlang

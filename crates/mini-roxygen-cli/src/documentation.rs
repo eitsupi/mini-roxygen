@@ -261,6 +261,23 @@ mod tests {
         libraries
     }
 
+    fn require_installed_documentation(libraries: &[PathBuf], package: &str) {
+        if env::var_os("MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS").is_none() {
+            return;
+        }
+
+        assert!(
+            !libraries.is_empty(),
+            "MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS is set but no R library is available"
+        );
+        assert!(
+            libraries
+                .iter()
+                .any(|library| library.join(package).join("Meta/package.rds").is_file()),
+            "MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS is set but the installed {package} package is unavailable"
+        );
+    }
+
     fn parse_r_home_output(output: &str) -> Option<PathBuf> {
         output
             .lines()
@@ -412,11 +429,13 @@ mod tests {
     #[test]
     fn installed_help_alias_and_canonical_requests_share_topic_cache() {
         let libraries = installed_r_libraries();
+        require_installed_documentation(&libraries, "utils");
         if libraries.is_empty() {
             println!("skipping: no standard installed R library is available");
             return;
         }
 
+        let mut tested = false;
         for library in libraries {
             let package_dir = library.join("utils");
             if !package_dir.join("Meta/package.rds").is_file() {
@@ -435,6 +454,7 @@ mod tests {
                 );
                 continue;
             };
+            tested = true;
             let raw = database.raw_topic(&canonical).unwrap();
             let document = rd_ast::lower_r_object(&raw).unwrap();
             let provider = InstalledDocumentationProvider::new(std::slice::from_ref(&library));
@@ -494,16 +514,22 @@ mod tests {
             assert_eq!(provider.databases.borrow().len(), 1);
             assert_eq!(provider.topics.borrow().len(), 1);
         }
+        assert!(
+            tested || env::var_os("MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS").is_none(),
+            "MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS is set but no installed utils documentation could be inspected"
+        );
     }
 
     #[test]
     fn installed_help_provider_reaches_external_inheritance_when_available() {
         let libraries = installed_r_libraries();
+        require_installed_documentation(&libraries, "utils");
         if libraries.is_empty() {
             println!("skipping: no standard installed R library is available");
             return;
         }
 
+        let mut tested = false;
         for library in libraries {
             if !library.join("utils/Meta/package.rds").is_file() {
                 println!(
@@ -512,6 +538,7 @@ mod tests {
                 );
                 continue;
             }
+            tested = true;
             let mut sources = SourceMap::new();
             sources.add_file(SourceFile::new(
                 PathBuf::from("R/inherit.R"),
@@ -603,11 +630,16 @@ Mean target
 "###);
             }
         }
+        assert!(
+            tested || env::var_os("MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS").is_none(),
+            "MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS is set but no installed utils documentation could be inspected"
+        );
     }
 
     #[test]
     fn installed_rlang_inheritance_absolutizes_donor_relative_links_when_available() {
         let libraries = installed_r_libraries();
+        require_installed_documentation(&libraries, "rlang");
         if libraries.is_empty() {
             println!("skipping: no installed R library is available");
             return;
@@ -663,7 +695,12 @@ target <- function(call = NULL) NULL
             assert!(!target.content.contains(r"\link[=abort]"));
         }
 
-        if !tested {
+        if env::var_os("MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS").is_some() {
+            assert!(
+                tested,
+                "MINI_ROXYGEN_REQUIRE_INSTALLED_DOCS is set but no installed rlang documentation could be inspected"
+            );
+        } else if !tested {
             println!("skipping: rlang is unavailable in discovered R libraries");
         }
     }
