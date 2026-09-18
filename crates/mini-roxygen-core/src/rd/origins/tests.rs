@@ -1,4 +1,4 @@
-use rd_ast::{RdDocument, RdNode, RdPath, RdPathSegment, RdTag};
+use rd_ast::{RdAstPath, RdAstPathSegment, RdDocument, RdNode, RdTag};
 use rd_writer::WriteError;
 
 use crate::source::{FileId, Span, TextRange};
@@ -15,43 +15,8 @@ fn span(start: u32) -> Span {
     Span::new(FileId::new(0), TextRange::new(start, start + 1))
 }
 
-fn resolve_public_path<'a>(document: &'a RdDocument, path: &RdPath) -> Option<&'a RdNode> {
-    let first = path.segments().first()?;
-    let mut node = match first {
-        RdPathSegment::TopLevel(index) => document.nodes().get(*index)?,
-        _ => return None,
-    };
-    let mut position = 1;
-    while position < path.segments().len() {
-        match &path.segments()[position] {
-            RdPathSegment::Child(index) => {
-                node = match node {
-                    RdNode::Tagged(tagged) => tagged.children().get(*index)?,
-                    RdNode::Group(group) => group.children().get(*index)?,
-                    RdNode::Raw(raw) => raw.children().get(*index)?,
-                    _ => return None,
-                };
-                position += 1;
-            }
-            RdPathSegment::Option => {
-                let Some(RdPathSegment::Child(index)) = path.segments().get(position + 1) else {
-                    return None;
-                };
-                node = match node {
-                    RdNode::Tagged(tagged) => tagged.option()?.get(*index)?,
-                    RdNode::Raw(raw) => raw.option()?.get(*index)?,
-                    _ => return None,
-                };
-                position += 2;
-            }
-            RdPathSegment::Attribute(_)
-            | RdPathSegment::AttributeValue
-            | RdPathSegment::ListElement(_)
-            | RdPathSegment::CharacterElement(_) => return Some(node),
-            _ => return None,
-        }
-    }
-    Some(node)
+fn resolve_public_path<'a>(document: &'a RdDocument, path: &RdAstPath) -> Option<&'a RdNode> {
+    document.node_at(path).map(|cursor| cursor.node())
 }
 
 fn origin_for_node(map: &super::OriginMap, node: &RdNode) -> Span {
@@ -73,8 +38,8 @@ fn assert_writer_path_origin(document: &RdDocument, map: &super::OriginMap) {
     let WriteError::Unserializable { path, .. } = &error else {
         panic!("expected an unserializable writer error, got {error:?}");
     };
-    let containing_path = if matches!(path.segments().last(), Some(RdPathSegment::Option)) {
-        RdPath::new(path.segments()[..path.segments().len() - 1].to_vec())
+    let containing_path = if matches!(path.segments().last(), Some(RdAstPathSegment::Option)) {
+        RdAstPath::new(path.segments()[..path.segments().len() - 1].to_vec())
     } else {
         path.clone()
     };
@@ -95,23 +60,11 @@ fn root_child_paths_do_not_alias_top_level_paths() {
     builder.record(node, &[span(10)]);
     let (_, map) = builder.materialize();
     assert_eq!(
-        span_for_path(
-            &map,
-            &RdPath::new(vec![
-                RdPathSegment::Child(0),
-                RdPathSegment::CharacterElement(1)
-            ])
-        ),
+        span_for_path(&map, &RdAstPath::new(vec![RdAstPathSegment::Child(0),])),
         None
     );
     assert_eq!(
-        span_for_path(
-            &map,
-            &RdPath::new(vec![
-                RdPathSegment::TopLevel(0),
-                RdPathSegment::CharacterElement(1)
-            ])
-        ),
+        span_for_path(&map, &RdAstPath::new(vec![RdAstPathSegment::TopLevel(0),])),
         Some(span(10))
     );
 }
@@ -126,11 +79,10 @@ fn option_paths_descend_before_falling_back() {
     builder.record(display, &[span(12)]);
     builder.add_root(link);
     let (_, map) = builder.materialize();
-    let option_path = RdPath::new(vec![
-        RdPathSegment::TopLevel(0),
-        RdPathSegment::Option,
-        RdPathSegment::Child(0),
-        RdPathSegment::CharacterElement(2),
+    let option_path = RdAstPath::new(vec![
+        RdAstPathSegment::TopLevel(0),
+        RdAstPathSegment::Option,
+        RdAstPathSegment::Child(0),
     ]);
     assert_eq!(span_for_path(&map, &option_path), Some(span(11)));
 }
@@ -259,14 +211,20 @@ fn bare_option_path_requires_an_existing_option() {
     assert_eq!(
         span_for_path(
             &map,
-            &RdPath::new(vec![RdPathSegment::TopLevel(0), RdPathSegment::Option])
+            &RdAstPath::new(vec![
+                RdAstPathSegment::TopLevel(0),
+                RdAstPathSegment::Option
+            ])
         ),
         Some(span(82))
     );
     assert_eq!(
         span_for_path(
             &map,
-            &RdPath::new(vec![RdPathSegment::TopLevel(1), RdPathSegment::Option])
+            &RdAstPath::new(vec![
+                RdAstPathSegment::TopLevel(1),
+                RdAstPathSegment::Option
+            ])
         ),
         None
     );
@@ -284,10 +242,9 @@ fn existing_node_without_an_origin_falls_back_to_its_ancestor() {
     assert_eq!(
         span_for_path(
             &map,
-            &RdPath::new(vec![
-                RdPathSegment::TopLevel(0),
-                RdPathSegment::Child(0),
-                RdPathSegment::CharacterElement(0),
+            &RdAstPath::new(vec![
+                RdAstPathSegment::TopLevel(0),
+                RdAstPathSegment::Child(0),
             ])
         ),
         Some(span(84))
@@ -329,40 +286,36 @@ fn malformed_writer_paths_do_not_resolve_a_prefix() {
     let (_, map) = builder.materialize();
 
     for path in [
-        RdPath::new(vec![RdPathSegment::Child(0)]),
-        RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Child(0),
-            RdPathSegment::TopLevel(1),
+        RdAstPath::new(vec![RdAstPathSegment::Child(0)]),
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Child(0),
+            RdAstPathSegment::TopLevel(1),
         ]),
-        RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Option,
-            RdPathSegment::Option,
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Option,
+            RdAstPathSegment::Option,
         ]),
-        RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Option,
-            RdPathSegment::CharacterElement(0),
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Option,
         ]),
-        RdPath::new(vec![RdPathSegment::TopLevel(0), RdPathSegment::Child(99)]),
-        RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Option,
-            RdPathSegment::Child(0),
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Child(99),
+        ]),
+        RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Option,
+            RdAstPathSegment::Child(0),
         ]),
     ] {
         assert_eq!(span_for_path(&map, &path), None, "path {path:?}");
     }
 
     assert_eq!(
-        span_for_path(
-            &map,
-            &RdPath::new(vec![
-                RdPathSegment::TopLevel(0),
-                RdPathSegment::CharacterElement(0),
-            ])
-        ),
+        span_for_path(&map, &RdAstPath::new(vec![RdAstPathSegment::TopLevel(0),])),
         Some(span(31))
     );
 }
@@ -599,9 +552,9 @@ fn usage_contributions_keep_separate_origins() {
     ] {
         assert!(map.spans[&node].contains(&expected));
         let index = if node == contribution_nodes[1] { 1 } else { 3 };
-        let path = RdPath::new(vec![
-            RdPathSegment::TopLevel(0),
-            RdPathSegment::Child(index),
+        let path = RdAstPath::new(vec![
+            RdAstPathSegment::TopLevel(0),
+            RdAstPathSegment::Child(index),
         ]);
         assert_eq!(
             span_for_path(&map, &path),
@@ -683,15 +636,15 @@ fn identity_survives_inserting_a_sibling_before_a_node() {
         .iter()
         .find_map(|(path, id)| {
             (*id == held).then(|| {
-                RdPath::new(
+                RdAstPath::new(
                     path.iter()
                         .enumerate()
                         .map(|(position, segment)| match segment {
                             OriginPathSegment::Child(index) if position == 0 => {
-                                RdPathSegment::TopLevel(*index)
+                                RdAstPathSegment::TopLevel(*index)
                             }
-                            OriginPathSegment::Child(index) => RdPathSegment::Child(*index),
-                            OriginPathSegment::Option => RdPathSegment::Option,
+                            OriginPathSegment::Child(index) => RdAstPathSegment::Child(*index),
+                            OriginPathSegment::Option => RdAstPathSegment::Option,
                         })
                         .collect(),
                 )

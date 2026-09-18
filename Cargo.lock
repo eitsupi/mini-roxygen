@@ -365,9 +365,9 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "lzma-rust2"
-version = "0.18.1"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "243cb2271683c2855cad62142cbf38199db439b1b1e1ccdd5a011342894dd7cc"
+checksum = "5e2a88783b84d2d67ef2791778a9e76bfb68b8017aaf6c9d7d5f2626a478b16c"
 dependencies = [
  "sha2",
 ]
@@ -484,29 +484,28 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rd-ast"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32fe90dac6ea0a31cbb9800064377727ad5a9a2314fdf2574fc3faae31b0ca8f"
+checksum = "a31cc72afa6eaaa5eb717af1970dfd40cd2393993a8f37f911c511f818db8454"
 dependencies = [
  "rd-rds",
 ]
 
 [[package]]
 name = "rd-helpdb"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da286c76193458b2127640b5059e99dd8827a5b4a825aec4665820e656c3242"
+checksum = "218f4d8faae391e6652659a39a447fdb969920bc16b07938f16a4ce72f65808f"
 dependencies = [
- "flate2",
  "rd-rds",
  "thiserror",
 ]
 
 [[package]]
 name = "rd-rds"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf9515c75d24b41617a4863bd78bca58ac1b2db5df63adf500d553e6b653e79c"
+checksum = "4bebce80a9bccefd7fb281dea2b0e911aad541514aa6e07d64d1f8a93648dcd1"
 dependencies = [
  "bzip2",
  "flate2",
@@ -517,18 +516,18 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec2dddcad3095505c388f73e0d5020c3af72d08b0ece47a409250b5b99917e88"
+checksum = "aa991633d50c48148763cb05de96e879625dbe16d6ab35e5d78d1530e7e90041"
 dependencies = [
  "rd-ast",
 ]
 
 [[package]]
 name = "rd-writer"
-version = "0.4.0"
+version = "0.5.0-alpha.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8433072e9483989dfd6aeecd7464e72bce0b3bb7c2251ea2f97250f1cd21bb95"
+checksum = "4c88b4eeb7781f6b014a6fa03eda6e9d4b13980f5bac1542f1440ba78e520d4f"
 dependencies = [
  "rd-ast",
  "rd-source",

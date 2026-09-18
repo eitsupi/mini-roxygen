@@ -12,7 +12,7 @@
 //! there; preserving this distinction would require context-sensitive
 //! tokenization.
 
-use rd_ast::{RdNode, RdPath, RdTag};
+use rd_ast::{RdDocument, RdNode, RdNodeRef, RdNodesRef, RdTag};
 
 /// A flat, delimiter-free key for an inherited section title.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -43,8 +43,9 @@ enum SectionKeyConstruct {
 
 impl SectionTitleKey {
     pub(crate) fn from_rd(nodes: &[RdNode]) -> Self {
+        let document = RdDocument::new(nodes.to_vec());
         let mut builder = KeyBuilder::default();
-        builder.nodes(nodes, &RdPath::new(Vec::new()));
+        builder.nodes(document.top_level());
         Self(builder.tokens)
     }
 
@@ -61,14 +62,14 @@ struct KeyBuilder {
 }
 
 impl KeyBuilder {
-    fn nodes(&mut self, nodes: &[RdNode], path: &RdPath) {
-        for (index, node) in nodes.iter().enumerate() {
-            self.node(node, &path.with_child(index));
+    fn nodes(&mut self, nodes: RdNodesRef<'_>) {
+        for node in nodes {
+            self.node(node);
         }
     }
 
-    fn node(&mut self, node: &RdNode, path: &RdPath) {
-        match node {
+    fn node(&mut self, cursor: RdNodeRef<'_>) {
+        match cursor.node() {
             // RCode is the visible content of transparent markup such as
             // \code, \special, \usage, and \examples. It is not literal
             // display inside \Sexpr, where it is code to be evaluated; that
@@ -83,7 +84,7 @@ impl KeyBuilder {
             // A brace group is not visible in any position, including inside
             // a structural argument. Thus Group[Text("A")] keys exactly as
             // Argument(0) containing Text("A").
-            RdNode::Group(group) => self.nodes(group.children(), path),
+            RdNode::Group(_) => self.nodes(cursor.children()),
             RdNode::Raw(raw) => self.structural(
                 SectionKeyConstruct::Raw {
                     tag: raw.tag().map(str::to_owned),
@@ -95,22 +96,21 @@ impl KeyBuilder {
                     // Debug spelling is exact for values honouring that rule.
                     opaque: format!("{:?}", (raw.payload(), raw.attributes())),
                 },
-                raw.option(),
-                raw.children(),
-                path,
+                cursor.option(),
+                cursor.children(),
             ),
-            RdNode::Tagged(tagged) => self.tagged(node, tagged, path),
+            RdNode::Tagged(tagged) => self.tagged(cursor, tagged),
             // RdNode is non-exhaustive. A newly added leaf must not silently
             // become visible text and collide with an existing title.
-            _ => self.structural_node(node, path),
+            _ => self.structural_node(cursor),
         }
     }
 
-    fn tagged(&mut self, node: &RdNode, tagged: &rd_ast::RdTagged, path: &RdPath) {
+    fn tagged(&mut self, cursor: RdNodeRef<'_>, tagged: &rd_ast::RdTagged) {
         // These view accessors are intentionally used only for the
         // transparent set. Every failed or unusable view falls through to
         // the same node's raw structural representation below.
-        if let Some(view) = node.inline_span(path) {
+        if let Some(view) = cursor.inline_span_lossy() {
             match view.kind() {
                 // rd-ast groups these with uniform one-argument spans, but
                 // rendering adds output-dependent quotation characters.
@@ -135,7 +135,7 @@ impl KeyBuilder {
                 | rd_ast::RdInlineSpanKind::Abbr
                 | rd_ast::RdInlineSpanKind::Cite
                 | rd_ast::RdInlineSpanKind::Dfn => {
-                    self.nodes(view.body(), path);
+                    self.nodes(view.body_ref());
                     return;
                 }
                 // RdInlineSpanKind is non-exhaustive. New kinds must remain
@@ -144,7 +144,7 @@ impl KeyBuilder {
             }
         }
 
-        if let Some(view) = node.text_symbol(path) {
+        if let Some(view) = cursor.text_symbol_lossy() {
             match view.kind() {
                 rd_ast::RdTextSymbolKind::R
                 | rd_ast::RdTextSymbolKind::Dots
@@ -157,43 +157,43 @@ impl KeyBuilder {
         }
 
         if tagged.tag() == &RdTag::I && tagged.option().is_none() {
-            self.nodes(tagged.children(), path);
+            self.nodes(cursor.children());
             return;
         }
 
         match tagged.tag() {
             RdTag::Link => {
-                if let Ok(view) = tagged.inspect_link(path) {
-                    self.nodes(view.display(), path);
+                if let Ok(Some(view)) = cursor.inspect_link() {
+                    self.nodes(view.display_ref());
                     return;
                 }
             }
             RdTag::Href => {
-                if let Ok(view) = tagged.inspect_href(path) {
-                    self.nodes(view.display(), path);
+                if let Ok(Some(view)) = cursor.inspect_href() {
+                    self.nodes(view.display_ref());
                     return;
                 }
             }
             _ => {}
         }
 
-        if let Some(view) = node.s4_class_link(path) {
-            self.nodes(view.class(), path);
+        if let Some(view) = cursor.s4_class_link_lossy() {
+            self.nodes(view.class_ref());
             return;
         }
 
-        self.structural_node(node, path);
+        self.structural_node(cursor);
     }
 
-    fn structural_node(&mut self, node: &RdNode, path: &RdPath) {
-        let Some(tagged) = node.as_tagged() else {
+    fn structural_node(&mut self, cursor: RdNodeRef<'_>) {
+        let Some(tagged) = cursor.node().as_tagged() else {
             // This arm is reachable only for a future RdNode variant. It has
             // no current representation to retain, so give it a distinct
             // non-text marker rather than flattening it.
             self.tokens
                 .push(SectionKeyToken::Open(SectionKeyConstruct::Raw {
                     tag: None,
-                    opaque: format!("{:?}", node),
+                    opaque: format!("{:?}", cursor.node()),
                 }));
             self.tokens.push(SectionKeyToken::Close);
             return;
@@ -202,15 +202,14 @@ impl KeyBuilder {
             RdTag::Unknown(value) => SectionKeyConstruct::UnknownTag(value.clone()),
             tag => SectionKeyConstruct::KnownTag(tag.as_rd_tag().to_owned()),
         };
-        self.structural(construct, tagged.option(), tagged.children(), path);
+        self.structural(construct, cursor.option(), cursor.children());
     }
 
     fn structural(
         &mut self,
         construct: SectionKeyConstruct,
-        option: Option<&[RdNode]>,
-        children: &[RdNode],
-        path: &RdPath,
+        option: Option<rd_ast::RdOptionRef<'_>>,
+        children: RdNodesRef<'_>,
     ) {
         // In particular, Sexpr is compared syntactically. Donor provenance is
         // deliberately absent, so identical dynamic source compares equal as
@@ -218,11 +217,11 @@ impl KeyBuilder {
         self.tokens.push(SectionKeyToken::Open(construct));
         if let Some(option) = option {
             self.tokens.push(SectionKeyToken::Option);
-            self.nodes(option, &path.with_option());
+            self.nodes(option.children());
         }
         for (index, child) in children.iter().enumerate() {
             self.tokens.push(SectionKeyToken::Argument(index));
-            self.node(child, &path.with_child(index));
+            self.node(child);
         }
         self.tokens.push(SectionKeyToken::Close);
     }

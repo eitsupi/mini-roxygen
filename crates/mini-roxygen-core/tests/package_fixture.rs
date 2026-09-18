@@ -251,7 +251,10 @@ fn ast_text(nodes: &[RdNode]) -> String {
 }
 
 fn normalized_topic(document: &RdDocument) -> Value {
-    let name = document.name().map(ast_text).unwrap_or_default();
+    let name = document
+        .name_lossy()
+        .map(|field| ast_text(field.body()))
+        .unwrap_or_default();
     let mut aliases = document
         .nodes()
         .iter()
@@ -263,17 +266,17 @@ fn normalized_topic(document: &RdDocument) -> Value {
         })
         .collect::<Vec<_>>();
     let mut parameters = document
-        .arguments()
+        .arguments_lossy()
         .flat_map(|argument| {
-            ast_text(argument.name)
+            ast_text(argument.name())
                 .split(',')
                 .map(|name| name.trim().to_owned())
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
     let usage = document
-        .usage()
-        .map(ast_text)
+        .usage_lossy()
+        .map(|field| ast_text(field.body()))
         .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "));
     aliases.sort();
     aliases.dedup();

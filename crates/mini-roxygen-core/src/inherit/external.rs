@@ -1,6 +1,8 @@
 //! Projection of lowered external Rd documents into the inheritance boundary.
 
-use rd_ast::{RdDocument, RdNode, RdPath, RdTag, RdTextSymbolKind, text_contents};
+use rd_ast::{
+    RdDocument, RdNode, RdNodeRef, RdNodesRef, RdTag, RdTextSymbolKind, text_contents_lossy,
+};
 
 use crate::tags::{InheritField, ParamName};
 
@@ -30,14 +32,14 @@ pub fn project_external_topic(
     InheritableTopic {
         identity: source,
         params: document
-            .arguments()
+            .arguments_lossy()
             .map(|argument| {
-                let label_nodes = argument.name.to_vec();
+                let label_nodes = argument.name_ref();
                 InheritableParamGroup {
-                    names: parameter_names(argument.name),
-                    label: parameter_label(&label_nodes, package, provider),
+                    names: parameter_names_ref(label_nodes.clone()),
+                    label: parameter_label(label_nodes, package, provider),
                     description: external_content(
-                        argument.description,
+                        argument.description_ref(),
                         package,
                         canonical_topic,
                         InheritField::Params,
@@ -47,99 +49,99 @@ pub fn project_external_topic(
             })
             .collect(),
         fields: InheritableFields {
-            title: document.title().map(|nodes| {
+            title: document.title_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Title,
                     provider,
                 )
             }),
-            description: document.description().map(|nodes| {
+            description: document.description_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Description,
                     provider,
                 )
             }),
-            details: document.details().map(|nodes| {
+            details: document.details_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Details,
                     provider,
                 )
             }),
-            return_value: document.value().map(|nodes| {
+            return_value: document.value_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Return,
                     provider,
                 )
             }),
-            see_also: document.see_also().map(|nodes| {
+            see_also: document.see_also_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::SeeAlso,
                     provider,
                 )
             }),
-            references: document.references().map(|nodes| {
+            references: document.references_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::References,
                     provider,
                 )
             }),
-            examples: document.examples().map(|nodes| {
+            examples: document.examples_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Examples,
                     provider,
                 )
             }),
-            author: document.author().map(|nodes| {
+            author: document.author_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Author,
                     provider,
                 )
             }),
-            source: document.source().map(|nodes| {
+            source: document.source_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Source,
                     provider,
                 )
             }),
-            note: document.note().map(|nodes| {
+            note: document.note_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Note,
                     provider,
                 )
             }),
-            format: document.format().map(|nodes| {
+            format: document.format_lossy().map(|field| {
                 external_content(
-                    nodes,
+                    field.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Format,
@@ -148,17 +150,17 @@ pub fn project_external_topic(
             }),
         },
         sections: document
-            .sections()
+            .sections_lossy()
             .map(|section| InheritableSection {
                 title: external_content(
-                    section.title,
+                    section.title_ref(),
                     package,
                     canonical_topic,
                     InheritField::Sections,
                     provider,
                 ),
                 body: external_content(
-                    section.body,
+                    section.body_ref(),
                     package,
                     canonical_topic,
                     InheritField::Sections,
@@ -170,8 +172,8 @@ pub fn project_external_topic(
     }
 }
 
-fn parameter_names(nodes: &[RdNode]) -> Vec<ParamName> {
-    split_parameter_label(nodes)
+fn parameter_names_ref(nodes: RdNodesRef<'_>) -> Vec<ParamName> {
+    split_parameter_label(nodes.nodes())
         .into_iter()
         .map(|fragment| text_contents_with_zero_arg_dots(&fragment))
         .map(|name| name.trim().to_owned())
@@ -181,18 +183,18 @@ fn parameter_names(nodes: &[RdNode]) -> Vec<ParamName> {
 }
 
 fn parameter_label(
-    nodes: &[RdNode],
+    nodes: RdNodesRef<'_>,
     package: &str,
     provider: &dyn DocumentationProvider,
 ) -> InheritableParamLabel {
-    let fragments = split_parameter_label(nodes);
+    let fragments = split_parameter_label(nodes.nodes());
     let has_empty_fragment = fragments
         .iter()
         .any(|fragment| text_contents_with_zero_arg_dots(fragment).trim().is_empty());
     if has_empty_fragment {
         InheritableParamLabel::Generated
     } else {
-        InheritableParamLabel::Rd(absolutize_external_links(nodes.to_vec(), package, provider))
+        InheritableParamLabel::Rd(absolutize_external_links(nodes, package, provider))
     }
 }
 
@@ -233,18 +235,14 @@ fn split_parameter_label(nodes: &[RdNode]) -> Vec<Vec<RdNode>> {
 
 fn text_contents_with_zero_arg_dots(nodes: &[RdNode]) -> String {
     let mut output = String::new();
-    append_text_contents_with_zero_arg_dots(nodes, &RdPath::new(Vec::new()), &mut output);
+    let document = RdDocument::new(nodes.to_vec());
+    append_text_contents_with_zero_arg_dots(document.top_level(), &mut output);
     output
 }
 
-fn append_text_contents_with_zero_arg_dots(
-    nodes: &[RdNode],
-    parent_path: &RdPath,
-    output: &mut String,
-) {
-    for (index, node) in nodes.iter().enumerate() {
-        let path = parent_path.with_child(index);
-        if let Some(symbol) = node.text_symbol(&path)
+fn append_text_contents_with_zero_arg_dots(nodes: RdNodesRef<'_>, output: &mut String) {
+    for cursor in nodes {
+        if let Some(symbol) = cursor.text_symbol_lossy()
             && matches!(
                 symbol.kind(),
                 RdTextSymbolKind::Dots | RdTextSymbolKind::LDots
@@ -253,30 +251,24 @@ fn append_text_contents_with_zero_arg_dots(
             output.push_str(symbol.fallback_text());
             continue;
         }
-        match node {
-            RdNode::Tagged(tagged) => {
-                append_text_contents_with_zero_arg_dots(tagged.children(), &path, output);
+        match cursor.node() {
+            RdNode::Tagged(_) | RdNode::Group(_) | RdNode::Raw(_) => {
+                append_text_contents_with_zero_arg_dots(cursor.children(), output);
             }
-            RdNode::Group(group) => {
-                append_text_contents_with_zero_arg_dots(group.children(), &path, output);
-            }
-            RdNode::Raw(raw) => {
-                append_text_contents_with_zero_arg_dots(raw.children(), &path, output);
-            }
-            _ => output.push_str(&text_contents(std::slice::from_ref(node))),
+            _ => output.push_str(&text_contents_lossy(std::slice::from_ref(cursor.node()))),
         }
     }
 }
 
 fn external_content(
-    nodes: &[RdNode],
+    nodes: RdNodesRef<'_>,
     package: &str,
     canonical_topic: &str,
     component: InheritField,
     provider: &dyn DocumentationProvider,
 ) -> ResolvedContent {
     ResolvedContent {
-        value: InheritableContent::Rd(absolutize_external_links(nodes.to_vec(), package, provider)),
+        value: InheritableContent::Rd(absolutize_external_links(nodes, package, provider)),
         provenance: InheritanceTrace {
             source: DocumentationOrigin::External {
                 package: package.to_owned(),
@@ -289,66 +281,70 @@ fn external_content(
 }
 
 fn absolutize_external_links(
-    nodes: Vec<RdNode>,
+    nodes: RdNodesRef<'_>,
     package: &str,
     provider: &dyn DocumentationProvider,
 ) -> Vec<RdNode> {
     nodes
-        .into_iter()
-        .map(|node| absolutize_external_link(node, package, provider))
+        .iter()
+        .map(|node| absolutize_external_link_ref(node, package, provider))
         .collect()
 }
 
-fn absolutize_external_link(
-    node: RdNode,
+fn absolutize_external_link_ref(
+    cursor: RdNodeRef<'_>,
     package: &str,
     provider: &dyn DocumentationProvider,
 ) -> RdNode {
-    let replacement = external_link_replacement(&node, package, provider);
-    match node {
+    let replacement = external_link_replacement(&cursor, package, provider);
+    match cursor.node() {
         RdNode::Tagged(tagged) => {
-            let (mut tag, option, children) = tagged.into_parts();
-            let mut option =
-                option.map(|nodes| absolutize_external_links(nodes, package, provider));
-            let children = absolutize_external_links(children, package, provider);
+            let mut tag = tagged.tag().clone();
+            let mut option = cursor
+                .option()
+                .map(|option| absolutize_external_links(option.children(), package, provider));
+            let children = absolutize_external_links(cursor.children(), package, provider);
             if let Some((replacement_tag, replacement_option)) = replacement {
                 tag = replacement_tag;
                 option = Some(vec![RdNode::Text(replacement_option)]);
             }
             RdNode::tagged(tag, option, children)
         }
-        RdNode::Group(group) => RdNode::group(absolutize_external_links(
-            group.into_children(),
+        RdNode::Group(_) => RdNode::group(absolutize_external_links(
+            cursor.children(),
             package,
             provider,
         )),
         RdNode::Raw(raw) => {
-            let (tag, option, children, payload, attributes) = raw.into_parts();
+            let (tag, payload, attributes) = (raw.tag(), raw.payload(), raw.attributes());
             RdNode::Raw(rd_ast::producer::raw_node(
-                tag,
-                option.map(|nodes| absolutize_external_links(nodes, package, provider)),
-                absolutize_external_links(children, package, provider),
-                payload,
-                attributes,
+                tag.map(str::to_owned),
+                cursor
+                    .option()
+                    .map(|option| absolutize_external_links(option.children(), package, provider)),
+                absolutize_external_links(cursor.children(), package, provider),
+                payload.cloned(),
+                attributes.to_vec(),
             ))
         }
-        leaf => leaf,
+        leaf => leaf.clone(),
     }
 }
 
 fn external_link_replacement(
-    node: &RdNode,
+    cursor: &RdNodeRef<'_>,
     package: &str,
     provider: &dyn DocumentationProvider,
 ) -> Option<(RdTag, String)> {
-    let path = RdPath::new(Vec::new());
-    if let Some(tagged) = node.as_tagged()
-        && tagged.tag() == &RdTag::Link
+    if cursor
+        .node()
+        .as_tagged()
+        .is_some_and(|tagged| tagged.tag() == &RdTag::Link)
     {
-        let link = tagged.inspect_link(&path).ok()?;
+        let link = cursor.inspect_link().ok()??;
         let (alias, option) = match link.destination() {
             rd_ast::RdLinkDestination::DisplayText { nodes } => {
-                (text_contents(nodes), package.to_owned())
+                (text_contents_lossy(nodes), package.to_owned())
             }
             rd_ast::RdLinkDestination::Explicit { topic } => {
                 (topic.to_string(), format!("{package}:{topic}"))
@@ -363,13 +359,30 @@ fn external_link_replacement(
         .then_some((RdTag::Link, option));
     }
 
-    let s4 = node.s4_class_link(&path)?;
+    let s4 = cursor.s4_class_link_lossy()?;
     let alias = format!("{}-class", s4.class_text()?);
     matches!(
         provider.topic_exists(package, &alias),
         TopicExistence::Known(true)
     )
     .then(|| (RdTag::Link, format!("{package}:{alias}")))
+}
+
+#[cfg(test)]
+fn absolutize_external_link(
+    node: RdNode,
+    package: &str,
+    provider: &dyn DocumentationProvider,
+) -> RdNode {
+    let document = RdDocument::new(vec![node]);
+    let cursor = document.top_level().get(0).expect("test node");
+    absolutize_external_link_ref(cursor, package, provider)
+}
+
+#[cfg(test)]
+fn parameter_names(nodes: &[RdNode]) -> Vec<ParamName> {
+    let document = RdDocument::new(nodes.to_vec());
+    parameter_names_ref(document.top_level())
 }
 
 #[cfg(test)]

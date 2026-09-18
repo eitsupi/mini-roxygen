@@ -491,14 +491,14 @@ mod tests {
                     .unwrap(),
                 None
             );
-            match document.title() {
-                Some(nodes) => assert_eq!(
+            match document.title_lossy() {
+                Some(field) => assert_eq!(
                     projected
                         .fields
                         .title
                         .as_ref()
                         .map(|content| &content.value),
-                    Some(&InheritableContent::Rd(nodes.to_vec()))
+                    Some(&InheritableContent::Rd(field.body().to_vec()))
                 ),
                 None => assert!(projected.fields.title.is_none()),
             }

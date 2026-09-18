@@ -417,7 +417,7 @@ fn diagnostic_span(value: &RCodeText, range: Range<usize>, fallback: Option<Span
 
 #[cfg(test)]
 mod tests {
-    use rd_ast::{RdNode, RdPath, RdTag};
+    use rd_ast::{RdDocument, RdNode, RdTag};
 
     use super::supported_tag;
 
@@ -437,8 +437,11 @@ mod tests {
     #[test]
     fn supported_tag_matches_rd_ast_s_example_control_classification() {
         for tag in RdTag::KNOWN {
-            let is_example_control = RdNode::tagged(tag.clone(), None, Vec::new())
-                .example_control(&RdPath::new(Vec::new()))
+            let document = RdDocument::new(vec![RdNode::tagged(tag.clone(), None, Vec::new())]);
+            let is_example_control = document
+                .top_level()
+                .get(0)
+                .and_then(|cursor| cursor.example_control_lossy())
                 .is_some();
             let recognized_by_us = tag
                 .as_rd_tag()

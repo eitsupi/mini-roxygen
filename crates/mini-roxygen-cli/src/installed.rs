@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rd_rds::matrix::CharacterMatrix;
+use rd_rds::package::{MetadataField, NamespaceMetadata};
 
 use crate::base_catalog::{self, SupportedRMinor};
 use crate::documentation::InstalledDocumentationProvider;
@@ -155,22 +155,17 @@ fn fallback_message(version: Option<&str>, reason: &str) -> String {
 }
 
 fn extract_s3_generics(root: &rd_rds::RObject) -> Result<BTreeSet<String>, String> {
-    let Some(s3methods) = root.get_named("S3methods") else {
-        return Err("installed metadata has no S3methods field".to_owned());
-    };
-    extract_s3_matrix(s3methods)
-}
-
-fn extract_s3_matrix(matrix: &rd_rds::RObject) -> Result<BTreeSet<String>, String> {
-    let matrix = CharacterMatrix::try_from(matrix)
-        .map_err(|error| format!("invalid S3methods matrix: {error}"))?;
-    if matrix.ncol() == 0 {
-        return Err("invalid S3methods matrix: no columns".to_owned());
+    let metadata = NamespaceMetadata::from_object(root)
+        .map_err(|error| format!("invalid installed S3 metadata: {error}"))?;
+    match metadata.s3_generic_evidence() {
+        MetadataField::Missing => Ok(BTreeSet::new()),
+        MetadataField::Present(generics) => Ok(generics.iter().cloned().collect()),
+        MetadataField::Invalid(error) => Err(format!("invalid installed S3 metadata: {error}")),
+        MetadataField::UnsupportedSchema { description } => Err(format!(
+            "unsupported installed S3 metadata schema: {description}"
+        )),
+        _ => Err("unsupported installed S3 metadata field".to_owned()),
     }
-    Ok((0..matrix.nrow())
-        .filter_map(|row| matrix.get(row, 0).flatten())
-        .map(str::to_owned)
-        .collect())
 }
 
 pub(crate) fn render_warning(warning: &MetadataWarning) -> String {
@@ -267,24 +262,34 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use rd_rds::{Attribute, Attributes, RObject, RStr, RValue, Symbol};
+    use rd_rds::{
+        Attribute, Attributes, NativeEncodingSource, REncoding, RObject, RStr, RValue, Symbol,
+    };
     use tempfile::tempdir;
 
     use super::{
-        MetadataWarning, extract_s3_generics, extract_s3_matrix, parse_major_minor, render_warning,
-        select_base_catalog, visible_packages,
+        MetadataField, MetadataWarning, NamespaceMetadata, extract_s3_generics, parse_major_minor,
+        render_warning, select_base_catalog, visible_packages,
     };
     use crate::base_catalog::SupportedRMinor;
 
     const POSITIVE_NSINFO: &[u8] = include_bytes!("../tests/fixtures/nsinfo-positive.rds");
 
-    fn matrix(rows: i32, columns: i32) -> RObject {
+    fn r_string(value: &str) -> RStr {
+        RStr::new(
+            value.as_bytes(),
+            REncoding::Utf8,
+            NativeEncodingSource::AssumedUtf8,
+        )
+    }
+
+    fn named_list(entries: &[(&str, RObject)]) -> RObject {
         RObject::from_parts(
-            RValue::Character(vec![RStr::Na; (rows * columns) as usize]),
+            RValue::List(entries.iter().map(|(_, value)| value.clone()).collect()),
             Attributes::new(vec![Attribute::new(
-                Symbol::from("dim"),
+                Symbol::from("names"),
                 RObject::from_parts(
-                    RValue::Integer(vec![Some(rows), Some(columns)]),
+                    RValue::Character(entries.iter().map(|(name, _)| r_string(name)).collect()),
                     Attributes::default(),
                 ),
             )]),
@@ -292,24 +297,44 @@ mod tests {
     }
 
     #[test]
-    fn valid_zero_row_matrix_is_empty() {
+    fn missing_s3methods_is_empty_without_a_warning() {
+        let root = named_list(&[]);
         assert_eq!(
-            extract_s3_matrix(&matrix(0, 1)).expect("matrix"),
+            extract_s3_generics(&root).expect("metadata"),
             BTreeSet::new()
         );
     }
 
     #[test]
-    fn missing_field_is_rejected_without_guessing() {
-        let root = RObject::from_parts(RValue::List(Vec::new()), Attributes::default());
+    fn invalid_s3methods_is_returned_as_a_warning_error() {
+        let malformed =
+            RObject::from_parts(RValue::Character(vec![RStr::Na]), Attributes::default());
+        let root = named_list(&[("S3methods", malformed)]);
         assert!(extract_s3_generics(&root).is_err());
     }
 
     #[test]
-    fn zero_column_and_malformed_matrices_are_rejected() {
-        assert!(extract_s3_matrix(&matrix(0, 0)).is_err());
-        let malformed = RObject::from_parts(RValue::Character(Vec::new()), Attributes::default());
-        assert!(extract_s3_matrix(&malformed).is_err());
+    fn namespace_metadata_preserves_unsupported_registration_schema() {
+        let matrix = RObject::from_parts(
+            RValue::Character(vec![r_string("print"), r_string("class")]),
+            Attributes::new(vec![Attribute::new(
+                Symbol::from("dim"),
+                RObject::from_parts(
+                    RValue::Integer(vec![Some(1), Some(2)]),
+                    Attributes::default(),
+                ),
+            )]),
+        );
+        let root = named_list(&[("S3methods", matrix)]);
+        assert_eq!(
+            extract_s3_generics(&root).expect("generic evidence"),
+            BTreeSet::from(["print".to_owned()])
+        );
+        let metadata = NamespaceMetadata::from_object(&root).expect("metadata");
+        assert!(matches!(
+            metadata.s3_registrations(),
+            MetadataField::UnsupportedSchema { .. }
+        ));
     }
 
     #[test]
