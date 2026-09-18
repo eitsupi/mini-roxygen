@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rd_rds::package::{MetadataField, NamespaceMetadata};
+use rd_rds::package::{MetadataField, NamespaceMetadata, PackageMeta};
 
 use crate::base_catalog::{self, SupportedRMinor};
 use crate::documentation::InstalledDocumentationProvider;
@@ -78,34 +78,45 @@ fn select_base_catalog(library_paths: &[PathBuf]) -> (SupportedRMinor, Vec<Metad
             }],
         );
     };
-    let description_path = base_path.join("DESCRIPTION");
-    let Some(description) = read_description(&base_path) else {
+    let metadata_path = package_metadata_path(&base_path);
+    let root = match rd_rds::file::read(&metadata_path) {
+        Ok(root) => root,
+        Err(_error) => {
+            return (
+                SupportedRMinor::R4_6,
+                vec![MetadataWarning {
+                    path: metadata_path,
+                    message: fallback_message(None, "base/Meta/package.rds could not be read"),
+                }],
+            );
+        }
+    };
+    let Ok(metadata) = PackageMeta::from_object(&root) else {
         return (
             SupportedRMinor::R4_6,
             vec![MetadataWarning {
-                path: description_path,
-                message: fallback_message(None, "base/DESCRIPTION could not be read"),
+                path: metadata_path,
+                message: fallback_message(None, "base/Meta/package.rds could not be decoded"),
             }],
         );
     };
-    let Some(version) = raw_field(&description, "Version") else {
+    let Some(built) = metadata.built() else {
         return (
             SupportedRMinor::R4_6,
             vec![MetadataWarning {
-                path: description_path,
-                message: fallback_message(None, "base/DESCRIPTION has no Version field"),
+                path: metadata_path,
+                message: fallback_message(None, "base/Meta/package.rds has no Built.R field"),
             }],
         );
     };
-    let Some((major, minor)) = parse_major_minor(&version) else {
+    let version = built.r_version().to_string();
+    let components = built.r_version().components();
+    let Some((&major, &minor)) = components.first().zip(components.get(1)) else {
         return (
             SupportedRMinor::R4_6,
             vec![MetadataWarning {
-                path: description_path,
-                message: fallback_message(
-                    Some(version.trim()),
-                    "the Version field could not be parsed",
-                ),
+                path: metadata_path,
+                message: fallback_message(Some(&version), "the Built.R field could not be parsed"),
             }],
         );
     };
@@ -115,9 +126,9 @@ fn select_base_catalog(library_paths: &[PathBuf]) -> (SupportedRMinor, Vec<Metad
         _ => (
             SupportedRMinor::R4_6,
             vec![MetadataWarning {
-                path: description_path,
+                path: metadata_path,
                 message: fallback_message(
-                    Some(version.trim()),
+                    Some(&version),
                     "the detected minor is outside the supported range",
                 ),
             }],
@@ -129,22 +140,7 @@ fn find_base_package(library_paths: &[PathBuf]) -> Option<PathBuf> {
     library_paths
         .iter()
         .map(|library| library.join("base"))
-        .find(|path| path.is_dir() && path.join("DESCRIPTION").exists())
-}
-
-/// Selects only the first two numeric components. R patch/build components are
-/// intentionally ignored for catalog selection, but every remaining component
-/// must still be a non-empty integer so malformed versions cannot be accepted.
-fn parse_major_minor(version: &str) -> Option<(u64, u64)> {
-    let mut parts = version.trim().split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    for component in parts {
-        if component.is_empty() || component.parse::<u64>().is_err() {
-            return None;
-        }
-    }
-    Some((major, minor))
+        .find(|path| path.is_dir() && package_metadata_path(path).is_file())
 }
 
 fn fallback_message(version: Option<&str>, reason: &str) -> String {
@@ -194,19 +190,35 @@ fn visible_packages(
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if !valid_package_name(name) || !seen.insert(name.to_owned()) {
+            if !valid_package_name(name) {
                 continue;
             }
-            let priority = read_description(&path)
-                .as_deref()
-                .and_then(|text| raw_field(text, "Priority"))
-                .is_some_and(|priority| {
-                    matches!(
-                        priority.trim().to_ascii_lowercase().as_str(),
-                        "base" | "recommended"
-                    )
-                });
-            if dependencies.contains(name) || priority {
+            let explicit_dependency = dependencies.contains(name);
+            let has_marker = package_metadata_path(&path).is_file();
+            if !explicit_dependency && !has_marker {
+                continue;
+            }
+            if !seen.insert(name.to_owned()) {
+                continue;
+            }
+            if explicit_dependency {
+                visible.insert(name.to_owned(), path);
+                continue;
+            }
+            let priority = read_package_metadata(&path)
+                .map(|metadata| {
+                    metadata
+                        .description_field("Priority")
+                        .flatten()
+                        .is_some_and(|priority| {
+                            matches!(
+                                priority.trim().to_ascii_lowercase().as_str(),
+                                "base" | "recommended"
+                            )
+                        })
+                })
+                .unwrap_or(false);
+            if priority {
                 visible.insert(name.to_owned(), path);
             }
         }
@@ -214,27 +226,14 @@ fn visible_packages(
     visible
 }
 
-fn read_description(package_path: &Path) -> Option<String> {
-    String::from_utf8(fs::read(package_path.join("DESCRIPTION")).ok()?).ok()
+fn package_metadata_path(package_path: &Path) -> PathBuf {
+    package_path.join("Meta/package.rds")
 }
 
-fn raw_field(text: &str, field: &str) -> Option<String> {
-    let mut value: Option<String> = None;
-    let mut collecting = false;
-    for line in text.lines() {
-        if line.starts_with([' ', '\t']) {
-            if collecting && let Some(current) = value.as_mut() {
-                current.push('\n');
-                current.push_str(line.trim_start());
-            }
-        } else if let Some((name, rest)) = line.split_once(':') {
-            collecting = name == field;
-            if collecting {
-                value = Some(rest.trim_start().to_owned());
-            }
-        }
-    }
-    value
+fn read_package_metadata(package_path: &Path) -> Option<PackageMeta> {
+    let path = package_metadata_path(package_path);
+    let root = rd_rds::file::read(&path).ok()?;
+    PackageMeta::from_object(&root).ok()
 }
 
 fn valid_package_name(package: &str) -> bool {
@@ -271,12 +270,22 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        MetadataField, MetadataWarning, NamespaceMetadata, extract_s3_generics, parse_major_minor,
-        render_warning, select_base_catalog, visible_packages,
+        MetadataField, MetadataWarning, NamespaceMetadata, extract_s3_generics,
+        package_metadata_path, render_warning, select_base_catalog, visible_packages,
     };
     use crate::base_catalog::SupportedRMinor;
 
     const POSITIVE_NSINFO: &[u8] = include_bytes!("../tests/fixtures/nsinfo-positive.rds");
+    const PACKAGE_META_R45: &[u8] = include_bytes!("../tests/fixtures/package-meta-r45.rds");
+    const PACKAGE_META_R46: &[u8] = include_bytes!("../tests/fixtures/package-meta-r46.rds");
+    const PACKAGE_META_R44: &[u8] = include_bytes!("../tests/fixtures/package-meta-r44.rds");
+    const PACKAGE_META_R47: &[u8] = include_bytes!("../tests/fixtures/package-meta-r47.rds");
+    const PACKAGE_META_RECOMMENDED: &[u8] =
+        include_bytes!("../tests/fixtures/package-meta-recommended.rds");
+    const PACKAGE_META_NO_PRIORITY: &[u8] =
+        include_bytes!("../tests/fixtures/package-meta-no-priority.rds");
+    const PACKAGE_META_NO_BUILT: &[u8] =
+        include_bytes!("../tests/fixtures/package-meta-no-built.rds");
 
     fn r_string(value: &str) -> RStr {
         RStr::new(
@@ -413,12 +422,59 @@ mod tests {
     }
 
     #[test]
+    fn installed_base_package_metadata_selects_the_matching_catalog() {
+        let libraries = crate::test_support::installed_r_libraries();
+        let Some(base) = libraries
+            .iter()
+            .map(|library| library.join("base"))
+            .find(|package| package_metadata_path(package).is_file())
+        else {
+            crate::test_support::require_installed_documentation(&libraries, "base");
+            return;
+        };
+
+        let root = match rd_rds::file::read(package_metadata_path(&base)) {
+            Ok(root) => root,
+            Err(error) if crate::test_support::installed_docs_required() => {
+                panic!("required installed base metadata could not be read: {error}")
+            }
+            Err(_) => return,
+        };
+        let metadata = match rd_rds::package::PackageMeta::from_object(&root) {
+            Ok(metadata) => metadata,
+            Err(error) if crate::test_support::installed_docs_required() => {
+                panic!("required installed base metadata could not be decoded: {error}")
+            }
+            Err(_) => return,
+        };
+        assert_eq!(metadata.description_field("Priority"), Some(Some("base")));
+        let Some(built) = metadata.built() else {
+            assert!(
+                !crate::test_support::installed_docs_required(),
+                "required installed base metadata has no Built.R field"
+            );
+            return;
+        };
+        let version = built.r_version().components();
+        let expected = match version.get(0..2) {
+            Some([4, 5]) => SupportedRMinor::R4_5,
+            Some([4, 6]) => SupportedRMinor::R4_6,
+            _ => {
+                assert!(
+                    !crate::test_support::installed_docs_required(),
+                    "required installed base metadata reports an unsupported R version"
+                );
+                return;
+            }
+        };
+        assert_eq!(select_base_catalog(&libraries).0, expected);
+    }
+
+    #[test]
     fn load_providers_reads_the_fixture_from_a_visible_dependency() {
         let library = tempdir().expect("library");
         let package = library.path().join("dep");
         fs::create_dir_all(package.join("Meta")).expect("package");
-        fs::write(package.join("DESCRIPTION"), "Package: dep\nVersion: 1.0\n")
-            .expect("description");
         fs::write(package.join("Meta/nsInfo.rds"), POSITIVE_NSINFO).expect("metadata");
 
         let loaded = super::load_providers(
@@ -436,17 +492,33 @@ mod tests {
         assert!(loaded.s3.generics.contains("mean"));
     }
 
+    #[test]
+    fn explicit_dependencies_remain_visible_when_package_metadata_is_missing_or_invalid() {
+        let library = tempdir().expect("library");
+        let missing = library.path().join("missing");
+        fs::create_dir(&missing).expect("missing metadata package");
+        let invalid = library.path().join("invalid");
+        fs::create_dir_all(invalid.join("Meta")).expect("invalid metadata directory");
+        fs::write(invalid.join("Meta/package.rds"), b"not an RDS file")
+            .expect("invalid package metadata");
+        let visible = visible_packages(
+            &[library.path().to_owned()],
+            &BTreeSet::from(["missing".to_owned(), "invalid".to_owned()]),
+        );
+        assert_eq!(visible.get("missing"), Some(&missing));
+        assert_eq!(visible.get("invalid"), Some(&invalid));
+    }
+
     fn package(root: &std::path::Path, name: &str, priority: Option<&str>) {
         let path = root.join(name);
-        fs::create_dir_all(&path).expect("package directory");
-        let priority = priority
-            .map(|value| format!("Priority: {value}\n"))
-            .unwrap_or_default();
-        fs::write(
-            path.join("DESCRIPTION"),
-            format!("Package: {name}\nVersion: 1.0\n{priority}"),
-        )
-        .expect("description");
+        fs::create_dir_all(path.join("Meta")).expect("package directory");
+        let metadata = match priority {
+            None => PACKAGE_META_NO_PRIORITY,
+            Some("base") => PACKAGE_META_R46,
+            Some("recommended") => PACKAGE_META_RECOMMENDED,
+            Some(other) => panic!("unsupported fixture priority {other}"),
+        };
+        fs::write(path.join("Meta/package.rds"), metadata).expect("package metadata");
     }
 
     #[test]
@@ -459,8 +531,11 @@ mod tests {
         package(second.path(), "shadowed", Some("recommended"));
         package(first.path(), "suggested", None);
         package(first.path(), "recommended", Some("recommended"));
+        package(first.path(), "basepriority", Some("base"));
         package(first.path(), "dependency", None);
         package(first.path(), "current", None);
+        fs::create_dir(first.path().join("unmarked")).expect("unmarked package directory");
+        package(second.path(), "unmarked", Some("recommended"));
         let dependencies = BTreeSet::from(["dependency".to_owned(), "duplicate".to_owned()]);
 
         let visible = visible_packages(
@@ -469,22 +544,20 @@ mod tests {
         );
         assert!(visible.contains_key("dependency"));
         assert!(visible.contains_key("recommended"));
+        assert!(visible.contains_key("basepriority"));
         assert!(visible.contains_key("duplicate"));
         assert!(!visible.contains_key("shadowed"));
         assert!(!visible.contains_key("suggested"));
         assert!(!visible.contains_key("current"));
+        assert_eq!(visible["unmarked"], second.path().join("unmarked"));
         assert_eq!(visible["duplicate"], first.path().join("duplicate"));
     }
 
-    fn base_library(version: &str) -> tempfile::TempDir {
+    fn base_library(metadata: &[u8]) -> tempfile::TempDir {
         let library = tempdir().expect("library");
         let base = library.path().join("base");
-        fs::create_dir_all(&base).expect("base directory");
-        fs::write(
-            base.join("DESCRIPTION"),
-            format!("Package: base\nVersion: {version}\nPriority: base\n"),
-        )
-        .expect("base description");
+        fs::create_dir_all(base.join("Meta")).expect("base directory");
+        fs::write(base.join("Meta/package.rds"), metadata).expect("base metadata");
         library
     }
 
@@ -503,75 +576,27 @@ mod tests {
     }
 
     #[test]
-    fn supported_patch_versions_select_their_minor_catalog() {
-        for version in ["4.5.0", "4.5.3", "4.5.99"] {
-            let library = base_library(version);
-            assert_eq!(
-                select_base_catalog(&[library.path().to_owned()]).0,
-                SupportedRMinor::R4_5
-            );
-            assert!(
-                select_base_catalog(&[library.path().to_owned()])
-                    .1
-                    .is_empty()
-            );
-        }
-        for version in ["4.6.0", "4.6.1", "4.6.99"] {
-            let library = base_library(version);
-            assert_eq!(
-                select_base_catalog(&[library.path().to_owned()]).0,
-                SupportedRMinor::R4_6
-            );
-            assert!(
-                select_base_catalog(&[library.path().to_owned()])
-                    .1
-                    .is_empty()
-            );
-        }
-    }
-
-    #[test]
-    fn extra_numeric_components_are_ignored_after_the_minor() {
-        let library = base_library("4.5.0.9000");
-        assert_eq!(
-            select_base_catalog(&[library.path().to_owned()]).0,
-            SupportedRMinor::R4_5
-        );
-        assert!(
-            select_base_catalog(&[library.path().to_owned()])
-                .1
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn version_components_after_minor_are_validated() {
-        for (version, expected) in [
-            ("4.5", Some((4, 5))),
-            ("4.5.0", Some((4, 5))),
-            ("4.5.0.9000", Some((4, 5))),
-            ("4.6.99", Some((4, 6))),
-            ("4.5.", None),
-            ("4.5.invalid", None),
-            ("4.5..1", None),
-            ("4.5.0.invalid", None),
+    fn supported_built_versions_select_their_minor_catalog() {
+        for (metadata, expected) in [
+            (PACKAGE_META_R45, SupportedRMinor::R4_5),
+            (PACKAGE_META_R46, SupportedRMinor::R4_6),
         ] {
-            assert_eq!(parse_major_minor(version), expected, "{version}");
+            let library = base_library(metadata);
+            let (minor, warnings) = select_base_catalog(&[library.path().to_owned()]);
+            assert_eq!(minor, expected);
+            assert!(warnings.is_empty());
         }
     }
 
     #[test]
-    fn unknown_old_new_and_unparseable_versions_warn_and_fallback() {
-        for version in ["4.4.9", "4.7.0", "not-a-version"] {
-            let library = base_library(version);
+    fn unsupported_or_missing_built_versions_warn_and_fallback() {
+        for metadata in [PACKAGE_META_R44, PACKAGE_META_R47, PACKAGE_META_NO_BUILT] {
+            let library = base_library(metadata);
             let (minor, warnings) = select_base_catalog(&[library.path().to_owned()]);
             assert_eq!(minor, SupportedRMinor::R4_6);
             assert_eq!(warnings.len(), 1);
             assert!(warnings[0].message.contains("supported R 4.5--4.6"));
             assert!(warnings[0].message.contains("R 4.6 semantics fallback"));
-            if version != "not-a-version" {
-                assert!(warnings[0].message.contains(version));
-            }
         }
     }
 
@@ -593,69 +618,46 @@ mod tests {
         let missing = select_base_catalog(&[std::path::PathBuf::from("/fixture/missing")]);
         insta::assert_snapshot!(render_warning(&missing.1[0]), @r###"warning: /fixture/missing the base package was not found; supported R 4.5--4.6; using R 4.6 semantics fallback"###);
 
-        for (version, expected) in [
+        for (metadata, expected) in [
             (
-                "4.4.9",
-                "warning: /fixture/base/DESCRIPTION the detected minor is outside the supported range; detected version 4.4.9; supported R 4.5--4.6; using R 4.6 semantics fallback",
+                PACKAGE_META_R44,
+                "warning: /fixture/base/Meta/package.rds the detected minor is outside the supported range; detected version 4.4.9; supported R 4.5--4.6; using R 4.6 semantics fallback",
             ),
             (
-                "4.7.0",
-                "warning: /fixture/base/DESCRIPTION the detected minor is outside the supported range; detected version 4.7.0; supported R 4.5--4.6; using R 4.6 semantics fallback",
+                PACKAGE_META_R47,
+                "warning: /fixture/base/Meta/package.rds the detected minor is outside the supported range; detected version 4.7.0; supported R 4.5--4.6; using R 4.6 semantics fallback",
             ),
             (
-                "not-a-version",
-                "warning: /fixture/base/DESCRIPTION the Version field could not be parsed; detected version not-a-version; supported R 4.5--4.6; using R 4.6 semantics fallback",
+                PACKAGE_META_NO_BUILT,
+                "warning: /fixture/base/Meta/package.rds base/Meta/package.rds has no Built.R field; supported R 4.5--4.6; using R 4.6 semantics fallback",
             ),
         ] {
-            let library = base_library(version);
+            let library = base_library(metadata);
             let (_, warnings) = select_base_catalog(&[library.path().to_owned()]);
             assert_eq!(normalized_warning(&warnings[0], library.path()), expected);
         }
     }
 
     #[test]
-    fn malformed_version_warning_snapshots_are_exact() {
-        let trailing_dot = base_library("4.5.");
-        let (_, warnings) = select_base_catalog(&[trailing_dot.path().to_owned()]);
-        insta::assert_snapshot!(
-            normalized_warning(&warnings[0], trailing_dot.path()),
-            @r###"warning: /fixture/base/DESCRIPTION the Version field could not be parsed; detected version 4.5.; supported R 4.5--4.6; using R 4.6 semantics fallback"###
-        );
-
-        let invalid = base_library("4.5.invalid");
-        let (_, warnings) = select_base_catalog(&[invalid.path().to_owned()]);
-        insta::assert_snapshot!(
-            normalized_warning(&warnings[0], invalid.path()),
-            @r###"warning: /fixture/base/DESCRIPTION the Version field could not be parsed; detected version 4.5.invalid; supported R 4.5--4.6; using R 4.6 semantics fallback"###
-        );
-
-        let empty_component = base_library("4.5..1");
-        let (_, warnings) = select_base_catalog(&[empty_component.path().to_owned()]);
-        insta::assert_snapshot!(
-            normalized_warning(&warnings[0], empty_component.path()),
-            @r###"warning: /fixture/base/DESCRIPTION the Version field could not be parsed; detected version 4.5..1; supported R 4.5--4.6; using R 4.6 semantics fallback"###
-        );
-
-        let invalid_patch = base_library("4.5.0.invalid");
-        let (_, warnings) = select_base_catalog(&[invalid_patch.path().to_owned()]);
-        insta::assert_snapshot!(
-            normalized_warning(&warnings[0], invalid_patch.path()),
-            @r###"warning: /fixture/base/DESCRIPTION the Version field could not be parsed; detected version 4.5.0.invalid; supported R 4.5--4.6; using R 4.6 semantics fallback"###
+    fn malformed_package_metadata_warning_is_precise() {
+        let library = tempdir().expect("library");
+        fs::create_dir_all(library.path().join("base/Meta")).expect("base metadata directory");
+        fs::write(
+            library.path().join("base/Meta/package.rds"),
+            b"not an RDS file",
+        )
+        .expect("malformed metadata");
+        let (_, warnings) = select_base_catalog(&[library.path().to_owned()]);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0]
+                .message
+                .contains("base/Meta/package.rds could not be read")
         );
     }
 
     #[test]
-    fn empty_and_whitespace_versions_fallback_without_panicking() {
-        for version in ["", "   "] {
-            let library = base_library(version);
-            let (_, warnings) = select_base_catalog(&[library.path().to_owned()]);
-            assert_eq!(warnings.len(), 1);
-            assert!(warnings[0].message.contains("could not be parsed"));
-        }
-    }
-
-    #[test]
-    fn base_directory_without_or_unreadable_description_falls_back() {
+    fn base_directory_without_or_unreadable_metadata_falls_back() {
         let missing = tempdir().expect("library");
         fs::create_dir(missing.path().join("base")).expect("base directory");
         let (_, missing_warnings) = select_base_catalog(&[missing.path().to_owned()]);
@@ -666,20 +668,24 @@ mod tests {
         );
 
         let unreadable = tempdir().expect("library");
-        fs::create_dir_all(unreadable.path().join("base/DESCRIPTION"))
-            .expect("unreadable description fixture");
+        fs::create_dir_all(unreadable.path().join("base/Meta")).expect("metadata directory");
+        fs::write(
+            unreadable.path().join("base/Meta/package.rds"),
+            b"not an RDS file",
+        )
+        .expect("unreadable metadata fixture");
         let (_, unreadable_warnings) = select_base_catalog(&[unreadable.path().to_owned()]);
         assert!(
             unreadable_warnings[0]
                 .message
-                .contains("base/DESCRIPTION could not be read")
+                .contains("base/Meta/package.rds could not be read")
         );
     }
 
     #[test]
     fn base_selection_honors_library_order() {
-        let first = base_library("4.5.0");
-        let second = base_library("4.6.99");
+        let first = base_library(PACKAGE_META_R45);
+        let second = base_library(PACKAGE_META_R46);
         assert_eq!(
             select_base_catalog(&[first.path().to_owned(), second.path().to_owned()]).0,
             SupportedRMinor::R4_5
