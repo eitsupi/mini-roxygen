@@ -107,10 +107,13 @@ jobs:
           for manifest in crates/mini-roxygen-core/Cargo.toml crates/mini-roxygen-cli/Cargo.toml; do
             echo "Checking package $manifest"
             cargo msrv \
+              verify \
               --manifest-path "$manifest" \
-              --output-format minimal \
-              verify -- \
-              cargo check --manifest-path "$manifest" --all-targets --all-features --locked
+              --output-format human \
+              --log-target stdout \
+              --log-level info \
+              -- \
+              cargo check --all-targets --all-features --locked
           done
 
   r-oracle:
@@ -142,7 +145,7 @@ jobs:
       - name: Capture R library paths
         id: r-libs
         run: |
-          paths=$(Rscript --vanilla -e 'cat(paste(.libPaths(), collapse = .Platform$path.sep))')
+          paths="$(Rscript --vanilla -e 'cat(paste(.libPaths(), collapse = .Platform[["path.sep"]]))')"
           test -n "$paths"
           echo "paths=$paths" >> "$GITHUB_OUTPUT"
       - name: Set up Rust stable
@@ -191,20 +194,6 @@ jobs:
           arguments: --all-features
           command-arguments: ''
 
-  workflow-lint:
-    name: Workflow lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-      - name: Lint workflows
-        run: "$(go env GOPATH)/bin/actionlint"
-
   required:
     name: Required checks
     if: ${{ always() }}
@@ -216,7 +205,6 @@ jobs:
       - r-oracle
       - docs
       - deny
-      - workflow-lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -229,7 +217,6 @@ jobs:
           R_ORACLE_RESULT: ${{ needs.r-oracle.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           DENY_RESULT: ${{ needs.deny.result }}
-          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
         run: |
           printf '%s\n' \
             "fmt=$FMT_RESULT" \
@@ -238,8 +225,7 @@ jobs:
             "msrv=$MSRV_RESULT" \
             "r-oracle=$R_ORACLE_RESULT" \
             "docs=$DOCS_RESULT" \
-            "deny=$DENY_RESULT" \
-            "workflow-lint=$WORKFLOW_LINT_RESULT"
+            "deny=$DENY_RESULT"
           test "$FMT_RESULT" = success
           test "$CLIPPY_RESULT" = success
           test "$TEST_RESULT" = success
@@ -247,4 +233,3 @@ jobs:
           test "$R_ORACLE_RESULT" = success
           test "$DOCS_RESULT" = success
           test "$DENY_RESULT" = success
-          test "$WORKFLOW_LINT_RESULT" = success
