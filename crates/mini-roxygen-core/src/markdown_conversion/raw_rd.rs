@@ -614,6 +614,7 @@ fn make_node(converter: &super::Converter<'_>, raw: &RawRdMacro) -> NodeWithOrig
             node: RdNode::tagged(tag.clone(), None, Vec::new()),
             children: Vec::new(),
             spans: converter.spans(raw.source.start, raw.source.end),
+            definition_spans: Vec::new(),
         },
         RawRdKind::Equation { tag, arguments } => {
             let mut groups = Vec::with_capacity(arguments.len());
@@ -626,12 +627,14 @@ fn make_node(converter: &super::Converter<'_>, raw: &RawRdMacro) -> NodeWithOrig
                     node: RdNode::Verb(line.to_owned()),
                     children: Vec::new(),
                     spans: spans.clone(),
+                    definition_spans: Vec::new(),
                 })
                 .collect::<Vec<_>>();
                 groups.push(NodeWithOrigin {
                     node: RdNode::group(leaves.iter().map(|leaf| leaf.node.clone()).collect()),
                     children: leaves,
                     spans: converter.spans(argument.outer.start, argument.outer.end),
+                    definition_spans: Vec::new(),
                 });
             }
             let children = groups.iter().map(|group| group.node.clone()).collect();
@@ -639,6 +642,7 @@ fn make_node(converter: &super::Converter<'_>, raw: &RawRdMacro) -> NodeWithOrig
                 node: RdNode::tagged(tag.clone(), None, children),
                 children: groups,
                 spans: converter.spans(raw.source.start, raw.source.end),
+                definition_spans: Vec::new(),
             }
         }
     }

@@ -26,6 +26,7 @@ rd-helpdb = "0.5.0-rc.1"
 rd-rds = "0.5.0-rc.1"
 rd-source = "0.5.0-rc.1"
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 tempfile = "3"
 toml = "1.1"
 unicode-width = "0.2.2"

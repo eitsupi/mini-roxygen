@@ -5,16 +5,26 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use mini_roxygen_core::{S3RegistrarRole, S3RegistrarSet, S3RegistrarSignature};
+use mini_roxygen_core::{
+    S3RegistrarRole, S3RegistrarSet, S3RegistrarSignature, SourceFile, TextRange,
+};
+use serde::Deserialize;
 
 pub(crate) const CONFIG_FILE: &str = "mini-roxygen.toml";
 
 /// TOML values extracted from one CLI configuration file.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LoadedConfig {
-    pub(crate) entries: BTreeMap<String, String>,
+    pub(crate) entries: BTreeMap<String, ConfigEntry>,
     pub(crate) registrars: S3RegistrarSet,
     pub(crate) origin: String,
+    pub(crate) source: SourceFile,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ConfigEntry {
+    pub(crate) value: String,
+    pub(crate) span: TextRange,
 }
 
 /// An operational failure while reading or parsing the CLI configuration.
@@ -69,10 +79,22 @@ pub(crate) fn load(root: &Path) -> Result<Option<LoadedConfig>, ConfigError> {
         entries,
         registrars,
         origin: path.display().to_string(),
+        source: SourceFile::new(PathBuf::from(CONFIG_FILE), text),
     }))
 }
 
-fn parse_config(text: &str) -> Result<(BTreeMap<String, String>, S3RegistrarSet), String> {
+#[derive(Debug, Deserialize)]
+struct SpannedConfig {
+    #[serde(rename = "inline-r")]
+    inline_r: Option<SpannedInlineR>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpannedInlineR {
+    substitutions: Option<BTreeMap<String, toml::Spanned<String>>>,
+}
+
+fn parse_config(text: &str) -> Result<(BTreeMap<String, ConfigEntry>, S3RegistrarSet), String> {
     let document = text
         .parse::<toml::Table>()
         .map_err(|error| error.to_string())?;
@@ -105,7 +127,27 @@ fn parse_config(text: &str) -> Result<(BTreeMap<String, String>, S3RegistrarSet)
                     "substitution values must be quoted strings: {key:?}"
                 ));
             };
-            entries.insert(key.clone(), value.to_owned());
+            entries.insert(
+                key.clone(),
+                ConfigEntry {
+                    value: value.to_owned(),
+                    span: TextRange::new(0, 0),
+                },
+            );
+        }
+    }
+    let spanned: SpannedConfig = toml::from_str(text).map_err(|error| error.to_string())?;
+    if let Some(substitutions) = spanned.inline_r.and_then(|inline_r| inline_r.substitutions) {
+        for (key, value) in substitutions {
+            let range = value.span();
+            let start =
+                u32::try_from(range.start).map_err(|_| "configuration is too large".to_owned())?;
+            let end =
+                u32::try_from(range.end).map_err(|_| "configuration is too large".to_owned())?;
+            let entry = entries
+                .get_mut(&key)
+                .ok_or_else(|| "internal configuration span mismatch".to_owned())?;
+            entry.span = TextRange::new(start, end);
         }
     }
     let mut additions = Vec::new();
@@ -231,8 +273,23 @@ mod tests {
         let loaded = load(root.path())
             .expect("configuration should load")
             .expect("config");
-        assert_eq!(loaded.entries["custom()"], r#"\code{custom}"#);
+        assert_eq!(loaded.entries["custom()"].value, r#"\code{custom}"#);
         assert!(loaded.origin.ends_with(CONFIG_FILE));
+    }
+
+    #[test]
+    fn configuration_entries_retain_the_raw_toml_value_span() {
+        let root =
+            write_config("[inline-r.substitutions]\n'custom()' = \"\\\\code{\u{03bb}}\\nnext\"\n");
+        let loaded = load(root.path())
+            .expect("configuration should load")
+            .expect("config");
+        let entry = &loaded.entries["custom()"];
+        assert_eq!(
+            loaded.source.text_range(entry.span),
+            Some(r#""\\code{λ}\nnext""#)
+        );
+        assert_eq!(entry.value, "\\code{λ}\nnext");
     }
 
     #[test]
@@ -257,7 +314,7 @@ mod tests {
                 .iter()
                 .any(|signature| signature.callee() == "register_s3_method")
         );
-        assert_eq!(loaded.entries["custom()"], r#"\code{custom}"#);
+        assert_eq!(loaded.entries["custom()"].value, r#"\code{custom}"#);
     }
 
     #[test]

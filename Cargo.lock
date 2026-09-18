@@ -397,6 +397,7 @@ dependencies = [
  "rd-ast",
  "rd-helpdb",
  "rd-rds",
+ "serde",
  "tempfile",
  "toml",
 ]

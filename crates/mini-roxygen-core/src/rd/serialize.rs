@@ -5,7 +5,7 @@ use rd_ast::RdDocument;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label, Severity};
 use crate::source::Span;
 
-use super::origins::{OriginMap, span_for_path};
+use super::origins::{OriginMap, definition_spans_for_path, span_for_path};
 
 pub(crate) fn serialize(
     document: &RdDocument,
@@ -20,12 +20,20 @@ pub(crate) fn serialize(
                 .ast_path()
                 .and_then(|path| span_for_path(origins, path))
                 .unwrap_or(anchor);
-            diagnostics.push(Diagnostic::new(
+            let mut diagnostic = Diagnostic::new(
                 Severity::Error,
                 DiagnosticCode::RdSerializationFailed,
                 format!("could not serialize Rd document: {error}"),
                 Label::new(span, "Rd serialization failed"),
-            ));
+            );
+            if let Some(path) = error.ast_path() {
+                diagnostic = diagnostic.with_secondaries(
+                    definition_spans_for_path(origins, path)
+                        .into_iter()
+                        .map(|span| Label::new(span, "replacement fragment defined here")),
+                );
+            }
+            diagnostics.push(diagnostic);
             None
         }
     }
@@ -54,6 +62,27 @@ mod tests {
         let diagnostic = diagnostics.iter().next().expect("writer diagnostic");
         assert_eq!(diagnostic.code, DiagnosticCode::RdSerializationFailed);
         assert_eq!(diagnostic.primary.span, span);
+    }
+
+    #[test]
+    fn writer_error_keeps_the_replacement_definition_as_secondary() {
+        let use_span = Span::new(FileId::new(0), TextRange::new(9, 10));
+        let definition_span = Span::new(FileId::new(1), TextRange::new(21, 33));
+        let mut builder = OriginBuilder::new();
+        let node = builder.append_node(RdNode::group(Vec::new()));
+        builder.record(node, &[use_span]);
+        builder.record_definition(node, &[definition_span]);
+        let (document, origins) = builder.materialize();
+        let mut diagnostics = crate::diagnostic::Diagnostics::new();
+        assert!(serialize(&document, &origins, use_span, &mut diagnostics).is_none());
+        let diagnostic = diagnostics.iter().next().expect("writer diagnostic");
+        assert_eq!(diagnostic.primary.span, use_span);
+        assert_eq!(diagnostic.secondary.len(), 1);
+        assert_eq!(diagnostic.secondary[0].span, definition_span);
+        assert_eq!(
+            diagnostic.secondary[0].message,
+            "replacement fragment defined here"
+        );
     }
 
     #[test]

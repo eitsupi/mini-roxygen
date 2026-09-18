@@ -6,14 +6,26 @@ use std::collections::{BTreeMap, BTreeSet};
 use rd_ast::{RdDocument, RdNode, RdTag};
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label, Severity};
-use crate::source::{FileId, Span, TextRange};
+use crate::source::{FileId, Span, Spanned, TextRange};
 
 /// The validated, effective substitutions used while converting Markdown.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineRSubstitutions {
-    entries: BTreeMap<String, Vec<RdNode>>,
+    entries: BTreeMap<String, InlineRSubstitution>,
     user_keys: BTreeSet<String>,
     origin: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InlineRSubstitution {
+    nodes: Vec<RdNode>,
+    definition_spans: Vec<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InlineRMatch {
+    pub(crate) nodes: Vec<RdNode>,
+    pub(crate) definition_spans: Vec<Span>,
 }
 
 /// Records user substitutions matched during one documentation invocation.
@@ -48,7 +60,7 @@ impl<'a> InlineRSession<'a> {
         }
     }
 
-    pub(crate) fn lookup(&self, key: &str) -> Option<Vec<RdNode>> {
+    pub(crate) fn lookup(&self, key: &str) -> Option<InlineRMatch> {
         let result = self.substitutions.lookup(key);
         if result.is_some() && self.substitutions.user_keys.contains(key) {
             self.usage.record(key);
@@ -69,7 +81,13 @@ impl InlineRSubstitutions {
             let key = format!(r#"lifecycle::badge("{stage}")"#);
             let value = lifecycle_badge_fragment(stage);
             let nodes = validate_fragment(&key, &value)?;
-            table.entries.insert(key.to_owned(), nodes);
+            table.entries.insert(
+                key.to_owned(),
+                InlineRSubstitution {
+                    nodes,
+                    definition_spans: Vec::new(),
+                },
+            );
         }
         Ok(table)
     }
@@ -81,6 +99,29 @@ impl InlineRSubstitutions {
     /// table is returned.
     pub fn from_user_entries(
         entries: BTreeMap<String, String>,
+        origin: Option<String>,
+    ) -> Result<Self, Diagnostics> {
+        let entries = entries
+            .into_iter()
+            .map(|(key, value)| (key, (value, None)))
+            .collect();
+        Self::from_user_entries_internal(entries, origin)
+    }
+
+    /// Builds an effective table while retaining each user's definition span.
+    pub fn from_user_entries_with_spans(
+        entries: BTreeMap<String, Spanned<String>>,
+        origin: Option<String>,
+    ) -> Result<Self, Diagnostics> {
+        let entries = entries
+            .into_iter()
+            .map(|(key, value)| (key, (value.value, Some(value.span))))
+            .collect();
+        Self::from_user_entries_internal(entries, origin)
+    }
+
+    fn from_user_entries_internal(
+        entries: BTreeMap<String, (String, Option<Span>)>,
         origin: Option<String>,
     ) -> Result<Self, Diagnostics> {
         let mut table = match Self::builtins() {
@@ -101,15 +142,16 @@ impl InlineRSubstitutions {
         };
         let mut validated = BTreeMap::new();
         let mut diagnostics = Diagnostics::new();
-        for (key, value) in entries {
+        for (key, (value, definition_span)) in entries {
             match validate_fragment(&key, &value) {
                 Ok(nodes) => {
-                    validated.insert(key, nodes);
+                    validated.insert(key, (nodes, definition_span));
                 }
                 Err(reason) => {
                     let origin = origin
                         .as_deref()
                         .map_or_else(String::new, |origin| format!(" in {origin}"));
+                    let primary = definition_span.unwrap_or_else(unresolvable_span);
                     diagnostics.push(
                         Diagnostic::new(
                             Severity::Error,
@@ -117,7 +159,7 @@ impl InlineRSubstitutions {
                             format!(
                                 "invalid Rd substitution for inline R expression {key:?}{origin}: {reason}"
                             ),
-                            Label::new(unresolvable_span(), "invalid inline R substitution"),
+                            Label::new(primary, "invalid inline R substitution"),
                         )
                         .with_help("provide a valid Rd fragment for this exact inline R expression"),
                     );
@@ -127,8 +169,14 @@ impl InlineRSubstitutions {
         if !diagnostics.is_empty() {
             return Err(diagnostics);
         }
-        for (key, nodes) in validated {
-            table.entries.insert(key.clone(), nodes);
+        for (key, (nodes, definition_span)) in validated {
+            table.entries.insert(
+                key.clone(),
+                InlineRSubstitution {
+                    nodes,
+                    definition_spans: definition_span.into_iter().collect(),
+                },
+            );
             table.user_keys.insert(key);
         }
         table.origin = origin;
@@ -136,8 +184,11 @@ impl InlineRSubstitutions {
     }
 
     /// Looks up an exact expression key without recording usage.
-    pub(crate) fn lookup(&self, key: &str) -> Option<Vec<RdNode>> {
-        self.entries.get(key).cloned()
+    pub(crate) fn lookup(&self, key: &str) -> Option<InlineRMatch> {
+        self.entries.get(key).map(|entry| InlineRMatch {
+            nodes: entry.nodes.clone(),
+            definition_spans: entry.definition_spans.clone(),
+        })
     }
 
     /// Reports user entries that were never encountered in source Markdown.
@@ -154,7 +205,14 @@ impl InlineRSubstitutions {
                     Severity::Warning,
                     DiagnosticCode::UnusedInlineRSubstitution,
                     format!("inline R substitution for {key:?}{origin} was not used"),
-                    Label::new(unresolvable_span(), "unused inline R substitution"),
+                    Label::new(
+                        self.entries[key]
+                            .definition_spans
+                            .first()
+                            .copied()
+                            .unwrap_or_else(unresolvable_span),
+                        "unused inline R substitution",
+                    ),
                 )
                 .with_help("remove the unused inline R substitution"),
             );
@@ -239,10 +297,76 @@ fn validate_fragment(key: &str, value: &str) -> Result<Vec<RdNode>, String> {
         ));
     }
     let children = tagged.children().to_vec();
-    rd_writer::write_document(&RdDocument::from(children.clone()))
-        .map_err(|error| format!("Rd writer error: {error}"))?;
+    let fragment = RdDocument::from(children.clone());
+    if let Err(error) = rd_writer::write_document(&fragment) {
+        let location = error
+            .ast_path()
+            .and_then(|path| fragment_writer_extent(path, tagged, parsed.source_map()))
+            .and_then(|extent| extent.start.checked_sub(r"\description{".len()))
+            .map_or_else(String::new, |offset| format!(" at byte {offset}"));
+        return Err(format!("Rd writer error{location}: {error}"));
+    }
     let _ = key;
     Ok(children)
+}
+
+fn fragment_writer_extent(
+    path: &rd_ast::RdAstPath,
+    wrapper: &rd_ast::RdTagged,
+    source_map: &rd_source::RdSourceMap,
+) -> Option<std::ops::Range<usize>> {
+    use rd_ast::RdAstPathSegment;
+
+    let [RdAstPathSegment::TopLevel(index), rest @ ..] = path.segments() else {
+        return None;
+    };
+    if *index >= wrapper.children().len() {
+        return None;
+    }
+    let mut node = &wrapper.children()[*index];
+    let mut option_children: Option<&[rd_ast::RdNode]> = None;
+    for (position, segment) in rest.iter().enumerate() {
+        match segment {
+            RdAstPathSegment::Child(child) => {
+                node = match option_children.take() {
+                    Some(children) => children.get(*child)?,
+                    None => match node {
+                        rd_ast::RdNode::Tagged(tagged) => tagged.children().get(*child)?,
+                        rd_ast::RdNode::Group(group) => group.children().get(*child)?,
+                        _ => return None,
+                    },
+                };
+            }
+            RdAstPathSegment::Option => {
+                if option_children.is_some() {
+                    return None;
+                }
+                option_children = Some(node.as_tagged()?.option()?);
+                if position + 1 == rest.len() {
+                    break;
+                }
+            }
+            RdAstPathSegment::TopLevel(_) => return None,
+            _ => return None,
+        }
+    }
+    if option_children.is_some() && !matches!(rest.last(), Some(RdAstPathSegment::Option)) {
+        return None;
+    }
+    let mut segments = vec![
+        RdAstPathSegment::TopLevel(0),
+        RdAstPathSegment::Child(*index),
+    ];
+    for segment in rest {
+        if matches!(segment, RdAstPathSegment::TopLevel(_)) {
+            return None;
+        }
+        segments.push(segment.clone());
+    }
+    let mapped = rd_ast::RdAstPath::new(segments);
+    let extent = source_map.span(&mapped)?.bytes();
+    let wrapper_extent = source_map.span(&rd_ast::RdAstPath::new(vec![]))?.bytes();
+    (extent.start >= wrapper_extent.start && extent.end <= wrapper_extent.end).then_some(extent)
 }
 
 #[cfg(test)]
@@ -254,6 +378,7 @@ mod tests {
 
     use super::{InlineRSession, InlineRSubstitutions, InlineRUsage};
     use crate::diagnostic::DiagnosticCode;
+    use crate::source::{Spanned, TextRange};
 
     #[test]
     fn lifecycle_badges_match_the_rendered_fragments_for_all_stages() {
@@ -301,7 +426,7 @@ mod tests {
             let key = format!(r#"lifecycle::badge("{stage}")"#);
             let output = Writer::new(rd_writer::WriterOptions::default())
                 .write_document(&RdDocument::from(
-                    table.lookup(&key).expect("lifecycle badge stage"),
+                    table.lookup(&key).expect("lifecycle badge stage").nodes,
                 ))
                 .expect("badge fragment should serialize");
             assert_eq!(output, expected, "rendered fragment for {stage}");
@@ -313,7 +438,8 @@ mod tests {
         let table = InlineRSubstitutions::builtins().expect("built-ins should validate");
         let nodes = table
             .lookup(r#"lifecycle::badge("experimental")"#)
-            .expect("experimental badge");
+            .expect("experimental badge")
+            .nodes;
         let output = Writer::new(rd_writer::WriterOptions::default())
             .write_document(&RdDocument::from(nodes))
             .expect("badge fragment should serialize");
@@ -340,11 +466,17 @@ mod tests {
             .expect("overridden badge");
         assert_eq!(
             Writer::new(rd_writer::WriterOptions::default())
-                .write_document(&RdDocument::from(overridden))
+                .write_document(&RdDocument::from(overridden.nodes))
                 .expect("override should serialize"),
             r"\strong{custom}"
         );
-        assert!(table.lookup("empty()").expect("empty mapping").is_empty());
+        assert!(
+            table
+                .lookup("empty()")
+                .expect("empty mapping")
+                .nodes
+                .is_empty()
+        );
     }
 
     #[test]
@@ -360,6 +492,23 @@ mod tests {
         assert!(diagnostic.message.contains("Rd parser"));
         assert!(diagnostic.message.contains("unclosed group"));
         assert!(!diagnostic.message.contains(".R"));
+    }
+
+    #[test]
+    fn invalid_user_definition_uses_its_configuration_span() {
+        let span = crate::source::Span::new(crate::source::FileId::new(7), TextRange::new(11, 19));
+        let diagnostics = InlineRSubstitutions::from_user_entries_with_spans(
+            BTreeMap::from([(
+                "broken()".to_owned(),
+                Spanned::new(r#"\strong{"#.to_owned(), span),
+            )]),
+            Some("mini-roxygen.toml".to_owned()),
+        )
+        .expect_err("invalid Rd should be a diagnostic");
+        assert_eq!(
+            diagnostics.iter().next().expect("diagnostic").primary.span,
+            span
+        );
     }
 
     #[test]
@@ -390,7 +539,7 @@ mod tests {
         .expect("multiline value should validate");
         let output = Writer::new(rd_writer::WriterOptions::default())
             .write_document(&RdDocument::from(
-                table.lookup("lines()").expect("lines mapping"),
+                table.lookup("lines()").expect("lines mapping").nodes,
             ))
             .expect("multiline value should serialize");
         assert!(output.contains(r"\code{first}"));
@@ -406,7 +555,7 @@ mod tests {
         .expect("basic string should validate");
         let output = Writer::new(rd_writer::WriterOptions::default())
             .write_document(&RdDocument::from(
-                table.lookup("escaped()").expect("escaped mapping"),
+                table.lookup("escaped()").expect("escaped mapping").nodes,
             ))
             .expect("escaped value should serialize");
         assert_eq!(output, r"\code{1}");
@@ -445,6 +594,24 @@ mod tests {
 
         let builtins = InlineRSubstitutions::builtins().expect("built-ins should validate");
         assert!(builtins.unused_diagnostics(&InlineRUsage::new()).is_empty());
+    }
+
+    #[test]
+    fn unused_user_definition_uses_its_configuration_span() {
+        let span = crate::source::Span::new(crate::source::FileId::new(3), TextRange::new(4, 12));
+        let table = InlineRSubstitutions::from_user_entries_with_spans(
+            BTreeMap::from([(
+                "never()".to_owned(),
+                Spanned::new(r#"\code{never}"#.to_owned(), span),
+            )]),
+            None,
+        )
+        .expect("configuration should validate");
+        let diagnostics = table.unused_diagnostics(&InlineRUsage::new());
+        assert_eq!(
+            diagnostics.iter().next().expect("diagnostic").primary.span,
+            span
+        );
     }
 
     #[test]

@@ -14,6 +14,7 @@ fn text_leaves(value: &str, spans: Vec<crate::source::Span>) -> Vec<NodeWithOrig
             node: RdNode::Text(line.to_owned()),
             children: Vec::new(),
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         })
         .collect()
 }
@@ -24,6 +25,7 @@ fn verb_leaves(value: &str, spans: Vec<crate::source::Span>) -> Vec<NodeWithOrig
             node: RdNode::Verb(line.to_owned()),
             children: Vec::new(),
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         })
         .collect()
 }
@@ -163,12 +165,14 @@ pub(super) fn lower_link(
         ),
         children: display,
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     };
     if code {
         vec![NodeWithOrigin {
             node: RdNode::tagged(RdTag::Code, None, vec![link.node.clone()]),
             children: vec![link],
             spans,
+            definition_spans: Vec::new(),
         }]
     } else {
         vec![link]
@@ -195,6 +199,7 @@ fn lower_url(
             ),
             children: display,
             spans,
+            definition_spans: Vec::new(),
         }
     } else {
         let url = verb_leaves(destination, spans.clone());
@@ -206,6 +211,7 @@ fn lower_url(
             node: RdNode::group(children.iter().map(|child| child.node.clone()).collect()),
             children,
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         };
         NodeWithOrigin {
             node: RdNode::tagged(
@@ -218,10 +224,12 @@ fn lower_url(
                     node: RdNode::group(url.iter().map(|child| child.node.clone()).collect()),
                     children: url,
                     spans: spans.clone(),
+                    definition_spans: Vec::new(),
                 },
                 display_group,
             ],
             spans,
+            definition_spans: Vec::new(),
         }
     }
 }
@@ -699,6 +707,7 @@ mod tests {
                 node: RdNode::Text("label".into()),
                 children: Vec::new(),
                 spans: Vec::new(),
+                definition_spans: Vec::new(),
             }],
             Vec::new(),
         );

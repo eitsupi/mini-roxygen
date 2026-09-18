@@ -27,6 +27,7 @@ struct ArenaNode {
     children: Vec<NodeId>,
     option: Option<Vec<NodeId>>,
     spans: Vec<Span>,
+    definition_spans: Vec<Span>,
 }
 
 #[derive(Debug)]
@@ -95,6 +96,7 @@ impl OriginBuilder {
         for origin in &fragment.origins {
             if let Some(id) = self.fragment_node(&roots, origin.path.segments()) {
                 self.record(id, &origin.spans);
+                self.record_definition(id, &origin.definition_spans);
             }
         }
         roots
@@ -232,6 +234,12 @@ impl OriginBuilder {
         }
     }
 
+    pub(crate) fn record_definition(&mut self, id: NodeId, spans: &[Span]) {
+        if let Some(node) = self.arena.get_mut(id.0) {
+            node.definition_spans.extend_from_slice(spans);
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn insert_root_before(&mut self, target: NodeId, node: RdNode) -> NodeId {
         let id = self.import_node(&node);
@@ -264,12 +272,19 @@ impl OriginBuilder {
             .enumerate()
             .map(|(index, node)| (NodeId(index), node.spans.clone()))
             .collect();
+        let definition_spans = self
+            .arena
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (NodeId(index), node.definition_spans.clone()))
+            .collect();
         (
             document,
             OriginMap {
                 paths,
                 option_paths,
                 spans,
+                definition_spans,
                 #[cfg(test)]
                 nodes: self
                     .arena
@@ -330,6 +345,7 @@ impl OriginBuilder {
             children,
             option,
             spans,
+            definition_spans: Vec::new(),
         });
         id
     }
@@ -464,12 +480,62 @@ pub(crate) struct OriginMap {
     /// is not an AST node and therefore is intentionally absent from `paths`.
     option_paths: BTreeSet<Vec<OriginPathSegment>>,
     spans: BTreeMap<NodeId, Vec<Span>>,
+    definition_spans: BTreeMap<NodeId, Vec<Span>>,
     #[cfg(test)]
     nodes: BTreeMap<NodeId, RdNode>,
 }
 
 /// Finds the nearest source origin for a canonical writer path.
 pub(crate) fn span_for_path(map: &OriginMap, path: &RdAstPath) -> Option<Span> {
+    let mut normalized = normalize_writer_path(path)?;
+    let bare_option = normalized.last() == Some(&OriginPathSegment::Option)
+        && map.option_paths.contains(&normalized);
+    if !bare_option && !map.paths.contains_key(&normalized) {
+        return None;
+    }
+    if bare_option {
+        normalized.pop();
+    }
+    loop {
+        if let Some(id) = map.paths.get(&normalized)
+            && let Some(span) = map.spans.get(id).and_then(|spans| spans.first())
+        {
+            return Some(*span);
+        }
+        if normalized.is_empty() {
+            return None;
+        }
+        normalized.pop();
+    }
+}
+
+pub(crate) fn definition_spans_for_path(map: &OriginMap, path: &RdAstPath) -> Vec<Span> {
+    let Some(mut normalized) = normalize_writer_path(path) else {
+        return Vec::new();
+    };
+    let bare_option = normalized.last() == Some(&OriginPathSegment::Option)
+        && map.option_paths.contains(&normalized);
+    if !bare_option && !map.paths.contains_key(&normalized) {
+        return Vec::new();
+    }
+    if bare_option {
+        normalized.pop();
+    }
+    loop {
+        if let Some(id) = map.paths.get(&normalized)
+            && let Some(spans) = map.definition_spans.get(id)
+            && !spans.is_empty()
+        {
+            return spans.clone();
+        }
+        if normalized.is_empty() {
+            return Vec::new();
+        }
+        normalized.pop();
+    }
+}
+
+fn normalize_writer_path(path: &RdAstPath) -> Option<Vec<OriginPathSegment>> {
     let mut normalized = Vec::new();
     let segments = path.segments();
     for (position, segment) in segments.iter().enumerate() {
@@ -494,25 +560,7 @@ pub(crate) fn span_for_path(map: &OriginMap, path: &RdAstPath) -> Option<Span> {
             _ => return None,
         }
     }
-    let bare_option = normalized.last() == Some(&OriginPathSegment::Option)
-        && map.option_paths.contains(&normalized);
-    if !bare_option && !map.paths.contains_key(&normalized) {
-        return None;
-    }
-    if bare_option {
-        normalized.pop();
-    }
-    loop {
-        if let Some(id) = map.paths.get(&normalized)
-            && let Some(span) = map.spans.get(id).and_then(|spans| spans.first())
-        {
-            return Some(*span);
-        }
-        if normalized.is_empty() {
-            return None;
-        }
-        normalized.pop();
-    }
+    Some(normalized)
 }
 
 pub(crate) fn tag_origin_spans(origin: &TagOrigin) -> Vec<Span> {

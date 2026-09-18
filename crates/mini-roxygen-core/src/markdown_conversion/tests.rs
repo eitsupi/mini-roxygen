@@ -6,7 +6,11 @@ use rd_ast::{RdDocument, RdTag};
 use rd_writer::Writer;
 
 use super::test_support::{assert_serialized_body, context, value};
-use super::{FragmentPath, convert_markdown as convert_markdown_with_context};
+use super::{
+    FragmentPath, HelpLinkResolver, LinkResolution, MarkdownContext,
+    convert_markdown as convert_markdown_with_context,
+};
+use crate::inline_r::{InlineRSession, InlineRSubstitutions, InlineRUsage};
 use crate::rd_oracle::{assert_r_accepts, minimal_topic};
 use crate::source::{FileId, SourceFile, Span, TextRange};
 use crate::tags::{MarkdownText, NormalizeHead, SourcedText};
@@ -21,6 +25,58 @@ fn diagnostic_messages(conversion: &super::MarkdownConversion) -> Vec<String> {
         .iter()
         .map(|diagnostic| diagnostic.message.clone())
         .collect()
+}
+
+struct LocalLinks;
+
+impl HelpLinkResolver for LocalLinks {
+    fn resolve_unqualified(&self, _topic: &str) -> LinkResolution {
+        LinkResolution::Local
+    }
+}
+
+#[test]
+fn inline_r_definition_provenance_survives_adjacent_text_and_substitutions() {
+    let substitutions = InlineRSubstitutions::from_user_entries_with_spans(
+        std::collections::BTreeMap::from([
+            (
+                "first()".to_owned(),
+                crate::source::Spanned::new(
+                    r#"\strong{first}"#.to_owned(),
+                    Span::new(FileId::new(1), TextRange::new(10, 24)),
+                ),
+            ),
+            (
+                "second()".to_owned(),
+                crate::source::Spanned::new(
+                    r#"\emph{second}"#.to_owned(),
+                    Span::new(FileId::new(1), TextRange::new(30, 44)),
+                ),
+            ),
+        ]),
+        Some("mini-roxygen.toml".to_owned()),
+    )
+    .expect("substitutions should validate");
+    let usage = InlineRUsage::new();
+    let session = InlineRSession::new(&substitutions, &usage);
+    let links = LocalLinks;
+    let context = MarkdownContext {
+        current_package: None,
+        links: &links,
+        inline_r_session: Some(&session),
+    };
+    let conversion = convert_markdown_with_context(
+        &value("before `r first()` middle `r second()` after"),
+        &context,
+    );
+    let definitions = conversion
+        .fragment
+        .origins
+        .iter()
+        .flat_map(|origin| origin.definition_spans.iter().copied())
+        .collect::<Vec<_>>();
+    assert!(definitions.contains(&Span::new(FileId::new(1), TextRange::new(10, 24))));
+    assert!(definitions.contains(&Span::new(FileId::new(1), TextRange::new(30, 44))));
 }
 
 #[test]

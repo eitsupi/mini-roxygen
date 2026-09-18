@@ -92,6 +92,7 @@ pub(crate) enum FrameKind {
 pub(crate) struct PendingText {
     pub(crate) text: String,
     pub(crate) spans: Vec<Span>,
+    pub(crate) definition_spans: Vec<Span>,
 }
 
 #[derive(Debug)]
@@ -99,6 +100,7 @@ pub(crate) struct NodeWithOrigin {
     pub(crate) node: RdNode,
     pub(crate) children: Vec<NodeWithOrigin>,
     pub(crate) spans: Vec<Span>,
+    pub(crate) definition_spans: Vec<Span>,
 }
 
 pub(super) enum FinishedFrame {
@@ -129,6 +131,7 @@ pub(crate) fn flush_pending(frame: &mut Frame) {
             node: RdNode::Text(line.to_owned()),
             children: Vec::new(),
             spans: pending.spans.clone(),
+            definition_spans: pending.definition_spans.clone(),
         }),
     );
 }
@@ -138,19 +141,23 @@ pub(crate) fn append_node(frame: &mut Frame, node: NodeWithOrigin) {
     frame.nodes.push(node);
 }
 
-pub(crate) fn node_with_origin(node: RdNode, spans: Vec<Span>) -> NodeWithOrigin {
+pub(crate) fn node_with_origin(
+    node: RdNode,
+    spans: Vec<Span>,
+    definition_spans: Vec<Span>,
+) -> NodeWithOrigin {
     let children = match &node {
         RdNode::Tagged(tagged) => tagged
             .children()
             .iter()
             .cloned()
-            .map(|child| node_with_origin(child, spans.clone()))
+            .map(|child| node_with_origin(child, spans.clone(), definition_spans.clone()))
             .collect(),
         RdNode::Group(group) => group
             .children()
             .iter()
             .cloned()
-            .map(|child| node_with_origin(child, spans.clone()))
+            .map(|child| node_with_origin(child, spans.clone(), definition_spans.clone()))
             .collect(),
         _ => Vec::new(),
     };
@@ -158,6 +165,7 @@ pub(crate) fn node_with_origin(node: RdNode, spans: Vec<Span>) -> NodeWithOrigin
         node,
         children,
         spans,
+        definition_spans,
     }
 }
 
@@ -251,6 +259,7 @@ pub(super) fn finish_frame(
                 node: RdNode::Verb(line.to_owned()),
                 children: Vec::new(),
                 spans: body_spans.clone(),
+                definition_spans: Vec::new(),
             })
             .collect::<Vec<_>>();
         return FinishedFrame::Nodes(vec![NodeWithOrigin {
@@ -261,6 +270,7 @@ pub(super) fn finish_frame(
             ),
             children: body_nodes,
             spans: converter.spans(start, end),
+            definition_spans: Vec::new(),
         }]);
     }
     if matches!(frame.kind, FrameKind::Subsection { .. }) {
@@ -289,6 +299,7 @@ pub(super) fn finish_frame(
                 node: RdNode::Text("\n".to_owned()),
                 children: Vec::new(),
                 spans: close_span.into_iter().collect(),
+                definition_spans: Vec::new(),
             });
         }
 
@@ -302,11 +313,13 @@ pub(super) fn finish_frame(
             node: RdNode::group(title_nodes),
             children: title,
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         };
         let body = NodeWithOrigin {
             node: RdNode::group(body_nodes.iter().map(|node| node.node.clone()).collect()),
             children: body_nodes,
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         };
         return FinishedFrame::Nodes(vec![NodeWithOrigin {
             node: RdNode::tagged(
@@ -316,6 +329,7 @@ pub(super) fn finish_frame(
             ),
             children: vec![title, body],
             spans,
+            definition_spans: Vec::new(),
         }]);
     }
     if let FrameKind::Link {
@@ -364,6 +378,7 @@ pub(super) fn finish_frame(
                 node: RdNode::tagged(tag, None, child_nodes),
                 children,
                 spans: converter.spans(start, end),
+                definition_spans: Vec::new(),
             }]
         }
     };
