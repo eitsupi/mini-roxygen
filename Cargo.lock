@@ -484,18 +484,18 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rd-ast"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31cc72afa6eaaa5eb717af1970dfd40cd2393993a8f37f911c511f818db8454"
+checksum = "a218d22060e6a93665be7a46492cf24665953763c0bbe5cdc079484eaef93cf7"
 dependencies = [
  "rd-rds",
 ]
 
 [[package]]
 name = "rd-helpdb"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "218f4d8faae391e6652659a39a447fdb969920bc16b07938f16a4ce72f65808f"
+checksum = "ffa53cd833d911f504d2fb325e253eb0c83cb1ac2c26e6ac9d895cc164609cc9"
 dependencies = [
  "rd-rds",
  "thiserror",
@@ -503,9 +503,9 @@ dependencies = [
 
 [[package]]
 name = "rd-rds"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bebce80a9bccefd7fb281dea2b0e911aad541514aa6e07d64d1f8a93648dcd1"
+checksum = "3ddd69f0e7991cc9cf7d2e680bcebbd1f9670c79e8ebeec7de8255ca891b3a2f"
 dependencies = [
  "bzip2",
  "flate2",
@@ -516,18 +516,18 @@ dependencies = [
 
 [[package]]
 name = "rd-source"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa991633d50c48148763cb05de96e879625dbe16d6ab35e5d78d1530e7e90041"
+checksum = "7faaf154365f5cc53c738759b14f1032269bf648434152dd32f73c5b24e28915"
 dependencies = [
  "rd-ast",
 ]
 
 [[package]]
 name = "rd-writer"
-version = "0.5.0-alpha.1"
+version = "0.5.0-rc.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c88b4eeb7781f6b014a6fa03eda6e9d4b13980f5bac1542f1440ba78e520d4f"
+checksum = "46d76cf976b1610c4ebac0877018752a8abf929de5d7c912efc9bdf2a4aff901"
 dependencies = [
  "rd-ast",
  "rd-source",

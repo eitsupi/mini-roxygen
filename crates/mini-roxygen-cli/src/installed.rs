@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rd_rds::package::{MetadataField, NamespaceMetadata, PackageMeta};
+use rd_rds::package::{InstalledMetadataError, MetadataField, NamespaceMetadata, PackageMeta};
 
 use crate::base_catalog::{self, SupportedRMinor};
 use crate::documentation::InstalledDocumentationProvider;
@@ -31,22 +31,36 @@ pub(crate) fn load_providers(
     let visible = visible_packages(library_paths, dependencies);
     let mut installed = BTreeSet::new();
     for package_path in visible.values() {
-        let metadata_path = package_path.join("Meta").join("nsInfo.rds");
-        let root = match rd_rds::file::read(&metadata_path) {
-            Ok(root) => root,
-            Err(_error) if is_missing(&metadata_path) => continue,
-            Err(error) => {
+        let metadata = match NamespaceMetadata::read_installed(package_path) {
+            Ok(metadata) => metadata,
+            Err(InstalledMetadataError::Read { path, .. }) if is_missing(&path) => continue,
+            Err(InstalledMetadataError::Read { path, source }) => {
                 warnings.push(MetadataWarning {
-                    path: metadata_path.clone(),
+                    path,
+                    message: format!("cannot read installed S3 metadata: {source}"),
+                });
+                continue;
+            }
+            Err(InstalledMetadataError::View { path, source }) => {
+                warnings.push(MetadataWarning {
+                    path,
+                    message: format!("invalid installed S3 metadata: {source}"),
+                });
+                continue;
+            }
+            Err(error) => {
+                let path = error.path().to_path_buf();
+                warnings.push(MetadataWarning {
+                    path,
                     message: format!("cannot read installed S3 metadata: {error}"),
                 });
                 continue;
             }
         };
-        match extract_s3_generics(&root) {
+        match extract_s3_generics_from_metadata(&metadata) {
             Ok(generics) => installed.extend(generics),
             Err(message) => warnings.push(MetadataWarning {
-                path: metadata_path,
+                path: package_path.join("Meta/nsInfo.rds"),
                 message,
             }),
         }
@@ -79,26 +93,35 @@ fn select_base_catalog(library_paths: &[PathBuf]) -> (SupportedRMinor, Vec<Metad
         );
     };
     let metadata_path = package_metadata_path(&base_path);
-    let root = match rd_rds::file::read(&metadata_path) {
-        Ok(root) => root,
-        Err(_error) => {
+    let metadata = match PackageMeta::read_installed(&base_path) {
+        Ok(metadata) => metadata,
+        Err(InstalledMetadataError::Read { path, .. }) => {
             return (
                 SupportedRMinor::R4_6,
                 vec![MetadataWarning {
-                    path: metadata_path,
+                    path,
                     message: fallback_message(None, "base/Meta/package.rds could not be read"),
                 }],
             );
         }
-    };
-    let Ok(metadata) = PackageMeta::from_object(&root) else {
-        return (
-            SupportedRMinor::R4_6,
-            vec![MetadataWarning {
-                path: metadata_path,
-                message: fallback_message(None, "base/Meta/package.rds could not be decoded"),
-            }],
-        );
+        Err(InstalledMetadataError::View { path, .. }) => {
+            return (
+                SupportedRMinor::R4_6,
+                vec![MetadataWarning {
+                    path,
+                    message: fallback_message(None, "base/Meta/package.rds could not be decoded"),
+                }],
+            );
+        }
+        Err(error) => {
+            return (
+                SupportedRMinor::R4_6,
+                vec![MetadataWarning {
+                    path: error.path().to_path_buf(),
+                    message: fallback_message(None, "base/Meta/package.rds could not be read"),
+                }],
+            );
+        }
     };
     let Some(built) = metadata.built() else {
         return (
@@ -150,9 +173,16 @@ fn fallback_message(version: Option<&str>, reason: &str) -> String {
     format!("{reason};{detected} supported R 4.5--4.6; using R 4.6 semantics fallback")
 }
 
+#[cfg(test)]
 fn extract_s3_generics(root: &rd_rds::RObject) -> Result<BTreeSet<String>, String> {
     let metadata = NamespaceMetadata::from_object(root)
         .map_err(|error| format!("invalid installed S3 metadata: {error}"))?;
+    extract_s3_generics_from_metadata(&metadata)
+}
+
+fn extract_s3_generics_from_metadata(
+    metadata: &NamespaceMetadata,
+) -> Result<BTreeSet<String>, String> {
     match metadata.s3_generic_evidence() {
         MetadataField::Missing => Ok(BTreeSet::new()),
         MetadataField::Present(generics) => Ok(generics.iter().cloned().collect()),
@@ -231,9 +261,7 @@ fn package_metadata_path(package_path: &Path) -> PathBuf {
 }
 
 fn read_package_metadata(package_path: &Path) -> Option<PackageMeta> {
-    let path = package_metadata_path(package_path);
-    let root = rd_rds::file::read(&path).ok()?;
-    PackageMeta::from_object(&root).ok()
+    PackageMeta::read_installed(package_path).ok()
 }
 
 fn valid_package_name(package: &str) -> bool {
@@ -433,17 +461,10 @@ mod tests {
             return;
         };
 
-        let root = match rd_rds::file::read(package_metadata_path(&base)) {
-            Ok(root) => root,
-            Err(error) if crate::test_support::installed_docs_required() => {
-                panic!("required installed base metadata could not be read: {error}")
-            }
-            Err(_) => return,
-        };
-        let metadata = match rd_rds::package::PackageMeta::from_object(&root) {
+        let metadata = match rd_rds::package::PackageMeta::read_installed(&base) {
             Ok(metadata) => metadata,
             Err(error) if crate::test_support::installed_docs_required() => {
-                panic!("required installed base metadata could not be decoded: {error}")
+                panic!("required installed base metadata could not be read: {error}")
             }
             Err(_) => return,
         };
@@ -490,6 +511,30 @@ mod tests {
         assert!(loaded.s3.generics.contains("+"));
         assert!(loaded.s3.generics.contains("print"));
         assert!(loaded.s3.generics.contains("mean"));
+    }
+
+    #[test]
+    fn load_providers_preserves_installed_metadata_read_warning_context() {
+        let library = tempdir().expect("library");
+        let package = library.path().join("dep");
+        fs::create_dir_all(package.join("Meta")).expect("package");
+        fs::write(package.join("Meta/nsInfo.rds"), b"not an RDS file").expect("metadata");
+
+        let loaded = super::load_providers(
+            &[library.path().to_owned()],
+            &BTreeSet::from(["dep".to_owned()]),
+        );
+        assert_eq!(loaded.warnings.len(), 2);
+        let warning = loaded
+            .warnings
+            .iter()
+            .find(|warning| warning.path == package.join("Meta/nsInfo.rds"))
+            .expect("namespace metadata warning");
+        assert!(
+            warning
+                .message
+                .starts_with("cannot read installed S3 metadata: ")
+        );
     }
 
     #[test]
