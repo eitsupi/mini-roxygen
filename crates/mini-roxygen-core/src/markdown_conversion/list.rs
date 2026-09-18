@@ -20,6 +20,7 @@ pub(super) fn lower_list(
             node: RdNode::Text("\n".to_owned()),
             children: Vec::new(),
             spans: spans.clone(),
+            definition_spans: Vec::new(),
         },
     );
     let child_nodes = children.iter().map(|child| child.node.clone()).collect();
@@ -27,6 +28,7 @@ pub(super) fn lower_list(
         node: RdNode::tagged(tag, None, child_nodes),
         children,
         spans,
+        definition_spans: Vec::new(),
     }
 }
 

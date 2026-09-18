@@ -65,6 +65,7 @@ pub(crate) fn append_flattened_node(frame: &mut Frame, node: NodeWithOrigin, anc
             if frame.pending.spans != node.spans {
                 append_spans(&mut frame.pending.spans, node.spans);
             }
+            append_spans(&mut frame.pending.definition_spans, node.definition_spans);
         }
         _ => {
             materialize_separator(frame, anchor);
@@ -74,6 +75,7 @@ pub(crate) fn append_flattened_node(frame: &mut Frame, node: NodeWithOrigin, anc
                     node: node.node,
                     children: node.children,
                     spans: node.spans,
+                    definition_spans: node.definition_spans,
                 },
             );
         }

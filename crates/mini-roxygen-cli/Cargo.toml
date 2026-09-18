@@ -21,6 +21,7 @@ mini-roxygen-core.workspace = true
 rd-ast = { workspace = true, features = ["rds"] }
 rd-helpdb.workspace = true
 rd-rds = { workspace = true, features = ["lazyload"] }
+serde.workspace = true
 tempfile.workspace = true
 toml.workspace = true
 

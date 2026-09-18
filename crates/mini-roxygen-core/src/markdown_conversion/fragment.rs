@@ -25,6 +25,7 @@ pub(crate) struct FragmentOrigin {
     /// These spans describe which source bytes produced the node; they do not
     /// map individual output characters back to source characters.
     pub(crate) spans: Vec<Span>,
+    pub(crate) definition_spans: Vec<Span>,
 }
 
 /// An edge in a fragment-origin path.
@@ -71,6 +72,7 @@ pub(super) fn flatten_node(node: NodeWithOrigin, path: FragmentPath, fragment: &
     let child_nodes = node.children;
     let node_value = node.node;
     let spans = node.spans;
+    let definition_spans = node.definition_spans;
     let child_paths = child_nodes
         .iter()
         .enumerate()
@@ -80,17 +82,19 @@ pub(super) fn flatten_node(node: NodeWithOrigin, path: FragmentPath, fragment: &
     fragment.origins.push(FragmentOrigin {
         path: path.clone(),
         spans: spans.clone(),
+        definition_spans: definition_spans.clone(),
     });
     for (child, child_path) in child_nodes.into_iter().zip(child_paths) {
         flatten_origin(child, child_path, fragment);
     }
-    flatten_option_origins(&node_value, path, &spans, fragment);
+    flatten_option_origins(&node_value, path, &spans, &definition_spans, fragment);
 }
 
 fn flatten_origin(node: NodeWithOrigin, path: FragmentPath, fragment: &mut LatexFragment) {
     let child_nodes = node.children;
     let node_value = node.node;
     let spans = node.spans;
+    let definition_spans = node.definition_spans;
     let child_paths = child_nodes
         .iter()
         .enumerate()
@@ -99,19 +103,21 @@ fn flatten_origin(node: NodeWithOrigin, path: FragmentPath, fragment: &mut Latex
     fragment.origins.push(FragmentOrigin {
         path: path.clone(),
         spans: spans.clone(),
+        definition_spans: definition_spans.clone(),
     });
     for (child, child_path) in child_nodes.into_iter().zip(child_paths) {
         flatten_origin(child, child_path, fragment);
     }
     // Option nodes are not part of NodeWithOrigin's ordinary child tree, but
     // they are still real Rd nodes and must retain the link's source envelope.
-    flatten_option_origins(&node_value, path, &spans, fragment);
+    flatten_option_origins(&node_value, path, &spans, &definition_spans, fragment);
 }
 
 fn flatten_option_origins(
     node: &RdNode,
     path: FragmentPath,
     spans: &[Span],
+    definition_spans: &[Span],
     fragment: &mut LatexFragment,
 ) {
     let Some(tagged) = node.as_tagged() else {
@@ -126,8 +132,9 @@ fn flatten_option_origins(
         fragment.origins.push(FragmentOrigin {
             path: child_path.clone(),
             spans: spans.to_vec(),
+            definition_spans: definition_spans.to_vec(),
         });
-        flatten_nested_option_origin(child, child_path, spans, fragment);
+        flatten_nested_option_origin(child, child_path, spans, fragment, definition_spans);
     }
 }
 
@@ -136,6 +143,7 @@ fn flatten_nested_option_origin(
     path: FragmentPath,
     spans: &[Span],
     fragment: &mut LatexFragment,
+    definition_spans: &[Span],
 ) {
     let child_nodes = match node {
         RdNode::Tagged(tagged) => tagged.children(),
@@ -147,7 +155,8 @@ fn flatten_nested_option_origin(
         fragment.origins.push(FragmentOrigin {
             path: child_path.clone(),
             spans: spans.to_vec(),
+            definition_spans: definition_spans.to_vec(),
         });
-        flatten_nested_option_origin(child, child_path, spans, fragment);
+        flatten_nested_option_origin(child, child_path, spans, fragment, definition_spans);
     }
 }

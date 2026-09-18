@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use mini_roxygen_core::{
     DocumentOptions, ExternalInheritancePolicy, ExternalPolicySource, InheritanceOptions,
-    InlineRSubstitutions, PackageInputs, document_package_with_options_and_providers,
+    InlineRSubstitutions, PackageInputs, Span, Spanned,
+    document_package_with_options_and_providers,
 };
 
 use crate::args::DocArgs;
@@ -37,7 +38,7 @@ impl Status {
 
 pub(crate) fn run(args: DocArgs) -> Status {
     let r_lib_paths = args.effective_r_lib_paths();
-    let inputs = match PackageInputs::from_package_root(&args.package_path) {
+    let mut inputs = match PackageInputs::from_package_root(&args.package_path) {
         Ok(inputs) => inputs,
         Err(error) => {
             eprintln!("error: {error}");
@@ -46,7 +47,18 @@ pub(crate) fn run(args: DocArgs) -> Status {
     };
     let (substitutions, registrars) = match crate::config::load(&args.package_path) {
         Ok(Some(config)) => {
-            match InlineRSubstitutions::from_user_entries(config.entries, Some(config.origin)) {
+            let config_file = inputs.sources.add_auxiliary_file(config.source);
+            let entries = config
+                .entries
+                .into_iter()
+                .map(|(key, entry)| {
+                    (
+                        key,
+                        Spanned::new(entry.value, Span::new(config_file, entry.span)),
+                    )
+                })
+                .collect();
+            match InlineRSubstitutions::from_user_entries_with_spans(entries, Some(config.origin)) {
                 Ok(substitutions) => (substitutions, config.registrars),
                 Err(diagnostics) => {
                     let rendered = render_diagnostics(&inputs.sources, diagnostics.iter());

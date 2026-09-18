@@ -337,13 +337,17 @@ impl SourceFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceMap {
     files: Vec<SourceFile>,
+    r_file_ids: Vec<FileId>,
 }
 
 impl SourceMap {
     /// Creates an empty source map.
     #[must_use]
     pub const fn new() -> Self {
-        Self { files: Vec::new() }
+        Self {
+            files: Vec::new(),
+            r_file_ids: Vec::new(),
+        }
     }
 
     /// Loads all direct `.R` and `.r` files under a package's `R/` directory.
@@ -375,10 +379,30 @@ impl SourceMap {
 
     /// Registers a source file and returns its registration-order identifier.
     pub fn add_file(&mut self, file: SourceFile) -> FileId {
+        let id = self.add_registered_file(file);
+        self.r_file_ids.push(id);
+        id
+    }
+
+    /// Registers a non-R source file for diagnostic provenance only.
+    ///
+    /// Auxiliary files are addressable from diagnostics but are never passed
+    /// to the R parser. This keeps source registration independent from the
+    /// set of files that form the package's R input.
+    pub fn add_auxiliary_file(&mut self, file: SourceFile) -> FileId {
+        self.add_registered_file(file)
+    }
+
+    fn add_registered_file(&mut self, file: SourceFile) -> FileId {
         let index = u32::try_from(self.files.len())
             .expect("a source map cannot contain more files than FileId can address");
         self.files.push(file);
         FileId::new(index)
+    }
+
+    /// Returns the registered R input file identifiers in registration order.
+    pub(crate) fn r_file_ids(&self) -> impl Iterator<Item = FileId> + '_ {
+        self.r_file_ids.iter().copied()
     }
 
     /// Returns the source file identified by `file`.
@@ -766,6 +790,25 @@ mod tests {
                 .expect("file should exist")
                 .path(),
             Path::new("R/z.R")
+        );
+    }
+
+    #[test]
+    fn auxiliary_sources_are_not_r_inputs() {
+        let mut sources = SourceMap::new();
+        let r_file = sources.add_file(SourceFile::new(
+            PathBuf::from("R/example.R"),
+            "x <- 1".to_owned(),
+        ));
+        let config_file = sources.add_auxiliary_file(SourceFile::new(
+            PathBuf::from("mini-roxygen.toml"),
+            "r syntax <- not an R input".to_owned(),
+        ));
+
+        assert_eq!(sources.r_file_ids().collect::<Vec<_>>(), vec![r_file]);
+        assert_eq!(
+            sources.get(config_file).expect("config source").path(),
+            Path::new("mini-roxygen.toml")
         );
     }
 

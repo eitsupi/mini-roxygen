@@ -109,11 +109,13 @@ pub(super) fn lower_table(
         node: RdNode::Text(spec),
         children: Vec::new(),
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     };
     let colspec = NodeWithOrigin {
         node: RdNode::group(vec![colspec_text.node.clone()]),
         children: vec![colspec_text],
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     };
 
     // Keep the wrapper newlines as explicit leaves. The row separators belong
@@ -124,6 +126,7 @@ pub(super) fn lower_table(
         node: RdNode::Text("\n".to_owned()),
         children: Vec::new(),
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     });
     let mut has_row = false;
     for row in rows {
@@ -134,6 +137,7 @@ pub(super) fn lower_table(
                 node: RdNode::Text("\n".to_owned()),
                 children: Vec::new(),
                 spans,
+                definition_spans: Vec::new(),
             });
         }
         body_nodes.extend(row);
@@ -143,11 +147,13 @@ pub(super) fn lower_table(
         node: RdNode::Text("\n".to_owned()),
         children: Vec::new(),
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     });
     let body = NodeWithOrigin {
         node: RdNode::group(body_nodes.iter().map(|node| node.node.clone()).collect()),
         children: body_nodes,
         spans: spans.clone(),
+        definition_spans: Vec::new(),
     };
 
     NodeWithOrigin {
@@ -158,6 +164,7 @@ pub(super) fn lower_table(
         ),
         children: vec![colspec, body],
         spans,
+        definition_spans: Vec::new(),
     }
 }
 
@@ -166,6 +173,7 @@ fn marker(tag: RdTag, anchor: Option<Span>) -> NodeWithOrigin {
         node: RdNode::tagged(tag, None, Vec::new()),
         children: Vec::new(),
         spans: anchor.into_iter().collect(),
+        definition_spans: Vec::new(),
     }
 }
 

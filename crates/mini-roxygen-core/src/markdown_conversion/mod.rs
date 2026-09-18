@@ -278,6 +278,7 @@ impl<'a> Converter<'a> {
                     node: RdNode::tagged(RdTag::Item, None, Vec::new()),
                     children: Vec::new(),
                     spans,
+                    definition_spans: Vec::new(),
                 },
             );
             let mut item = Frame::new(FrameKind::Item);
@@ -460,14 +461,18 @@ impl<'a> Converter<'a> {
             if is_multiline {
                 unsupported::diagnose_multiline_inline_r(self, range.start, range.end);
             } else if let Some(session) = self.context.inline_r_session {
-                if let Some(nodes) = session.lookup(expression) {
+                if let Some(inline_match) = session.lookup(expression) {
                     let spans = self.spans(range.start, range.end);
                     let anchor = self.anchor(range.start);
                     let frame = self.frames.last_mut().expect("the root frame exists");
-                    for node in nodes {
+                    for node in inline_match.nodes {
                         separator::append_flattened_node(
                             frame,
-                            frame::node_with_origin(node, spans.clone()),
+                            frame::node_with_origin(
+                                node,
+                                spans.clone(),
+                                inline_match.definition_spans.clone(),
+                            ),
                             anchor,
                         );
                     }
@@ -496,8 +501,10 @@ impl<'a> Converter<'a> {
                         node: RdNode::Verb(code.to_owned()),
                         children: Vec::new(),
                         spans: spans.clone(),
+                        definition_spans: Vec::new(),
                     }],
                     spans,
+                    definition_spans: Vec::new(),
                 },
             );
             return;
@@ -525,8 +532,10 @@ impl<'a> Converter<'a> {
                     node: leaf,
                     children: Vec::new(),
                     spans: spans.clone(),
+                    definition_spans: Vec::new(),
                 }],
                 spans,
+                definition_spans: Vec::new(),
             },
         );
     }

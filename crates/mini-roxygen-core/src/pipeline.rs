@@ -17,7 +17,6 @@ use crate::package::PackageInputs;
 use crate::r_parse;
 use crate::rd::{self, RdBuildOutput};
 use crate::s3_register::{S3RegistrarSet, S3RegistrationFact};
-use crate::source::FileId;
 use crate::tags::{TagParseOptions, UnknownTagPolicy, parse_block};
 
 /// All generated package outputs and diagnostics from the composed pipeline.
@@ -121,10 +120,10 @@ pub fn document_package_with_options_and_providers(
     let mut bindings = Vec::new();
     let mut registrations = Vec::<S3RegistrationFact>::new();
 
-    // SourceMap registration order is deterministic. Walking FileIds by index
-    // keeps this pipeline independent of any map implementation details.
-    for index in 0..sources.len() {
-        let file = FileId::new(u32::try_from(index).expect("source map has too many files"));
+    // SourceMap registration order is deterministic. Only explicitly
+    // registered R inputs belong to this analysis pass; auxiliary diagnostic
+    // sources must never be interpreted as R code.
+    for file in sources.r_file_ids() {
         let source = sources.get(file).expect("registered source file");
         let parsed = arity_adapter::parse(source, file);
         analysis_diagnostics.extend(parsed.diagnostics.iter().cloned());
@@ -321,6 +320,22 @@ mod tests {
             metadata: PackageMetadata::new("currentPackage", None)
                 .expect("test package name should be valid"),
         }
+    }
+
+    #[test]
+    fn auxiliary_configuration_source_is_not_parsed_as_r() {
+        let mut sources = SourceMap::new();
+        sources.add_auxiliary_file(SourceFile::new(
+            PathBuf::from("mini-roxygen.toml"),
+            "#' @title This is not an R input\nnot valid R syntax <-".to_owned(),
+        ));
+
+        let output = document_package(&inputs(sources));
+        assert!(
+            output
+                .diagnostics()
+                .all(|diagnostic| diagnostic.primary.span.file != FileId::new(0))
+        );
     }
 
     struct PipelineDocumentationProvider;
