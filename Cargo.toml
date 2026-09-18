@@ -15,8 +15,8 @@ homepage = "https://github.com/eitsupi/mini-roxygen"
 readme = "README.md"
 
 [workspace.dependencies]
-arity-formatter = "0.4.1"
-arity-parser = "0.5.1"
+arity-formatter = "0.7.1"
+arity-parser = "0.6.0"
 clap = { version = "4", features = ["derive"] }
 insta = { version = "1.48.0", default-features = false }
 pulldown-cmark = "0.13.1"

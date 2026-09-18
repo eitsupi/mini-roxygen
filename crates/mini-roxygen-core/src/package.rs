@@ -258,12 +258,7 @@ fn valid_package_name(package: &str) -> bool {
 }
 
 fn description_field(document: &Document, text: &str, name: &str) -> Option<String> {
-    description_field_raw(document, text, name).map(|value| {
-        // R read.dcf drops the empty first segment of `Field:\n value`.
-        // arity deliberately preserves it in folded_value(), so normalize it
-        // for fields that previously came from r-description's typed API.
-        value.strip_prefix('\n').unwrap_or(&value).to_owned()
-    })
+    description_field_raw(document, text, name)
 }
 
 fn description_field_raw(document: &Document, text: &str, name: &str) -> Option<String> {
@@ -604,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_field_value_matches_read_dcf_for_typed_fields() {
+    fn empty_field_value_matches_read_dcf() {
         let text = "Package: example.pkg\nDescription:\n continuation\n";
         let document = arity_parser::dcf::parse(text).document();
         assert_eq!(
@@ -613,7 +608,7 @@ mod tests {
         );
         assert_eq!(
             super::description_field_raw(&document, text, "Description"),
-            Some("\ncontinuation".to_owned())
+            Some("continuation".to_owned())
         );
     }
 
