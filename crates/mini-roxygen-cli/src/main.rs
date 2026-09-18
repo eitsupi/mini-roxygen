@@ -9,6 +9,8 @@ mod documentation;
 mod installed;
 mod output;
 mod provider;
+#[cfg(test)]
+mod test_support;
 
 fn main() -> ExitCode {
     let args = <args::Args as clap::Parser>::parse();

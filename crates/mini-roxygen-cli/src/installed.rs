@@ -262,6 +262,9 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    use rd_rds::package::{
+        BodyValidation, DefaultPresence, FormalsInspection, InspectionExtent, InstalledCodeDb,
+    };
     use rd_rds::{
         Attribute, Attributes, NativeEncodingSource, REncoding, RObject, RStr, RValue, Symbol,
     };
@@ -344,6 +347,69 @@ mod tests {
             extract_s3_generics(&root).expect("S3methods should decode"),
             BTreeSet::from(["+".to_owned(), "print".to_owned()])
         );
+    }
+
+    #[test]
+    fn installed_code_db_inspects_stats_median_formals_without_validating_body() {
+        let libraries = crate::test_support::installed_r_libraries();
+        let Some(package) = libraries
+            .iter()
+            .map(|library| library.join("stats"))
+            .find(|package| package.join("R/stats.rdx").is_file())
+        else {
+            assert!(
+                !crate::test_support::installed_docs_required(),
+                "required installed R docs are unavailable: stats code database was not found"
+            );
+            return;
+        };
+
+        let database = match InstalledCodeDb::open(&package) {
+            Ok(database) => database,
+            Err(error) if crate::test_support::installed_docs_required() => {
+                panic!("required installed stats code database could not be opened: {error}")
+            }
+            Err(_) => return,
+        };
+        let inspection = match database.inspect_stored_binding("median") {
+            Ok(inspection) => inspection,
+            Err(error) if crate::test_support::installed_docs_required() => {
+                panic!("required installed stats::median could not be inspected: {error}")
+            }
+            Err(_) => return,
+        };
+
+        let FormalsInspection::Available(formals) = inspection.formals() else {
+            panic!(
+                "stats::median did not expose closure formals: {:?}",
+                inspection.formals()
+            );
+        };
+        assert_eq!(
+            formals
+                .iter()
+                .map(|formal| formal.name())
+                .collect::<Vec<_>>(),
+            ["x", "na.rm", "..."]
+        );
+        assert_eq!(
+            formals
+                .iter()
+                .map(|formal| formal.default())
+                .collect::<Vec<_>>(),
+            [
+                DefaultPresence::Absent,
+                DefaultPresence::Present,
+                DefaultPresence::Absent
+            ]
+        );
+        assert!(matches!(
+            inspection.extent(),
+            InspectionExtent::ThroughFormals {
+                body_validation: BodyValidation::NotValidated,
+                ..
+            }
+        ));
     }
 
     #[test]
