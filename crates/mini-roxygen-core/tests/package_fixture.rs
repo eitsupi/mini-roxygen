@@ -257,13 +257,11 @@ fn normalized_topic(document: &RdDocument) -> Value {
         .map(|field| ast_text(field.body()))
         .unwrap_or_default();
     let mut aliases = document
-        .nodes()
-        .iter()
-        .filter_map(|node| match node {
-            RdNode::Tagged(tagged) if tagged.tag() == &RdTag::Alias => {
-                Some(ast_text(tagged.children()))
-            }
-            _ => None,
+        .inspect_aliases()
+        .map(|alias| {
+            alias
+                .unwrap_or_else(|error| panic!(r"strict \alias inspection failed: {error}"))
+                .text_contents_lossy()
         })
         .collect::<Vec<_>>();
     let mut parameters = document
