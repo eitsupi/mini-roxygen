@@ -64,15 +64,26 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b40bb616186ddc3b05ea7170e4d6a7e55e6449bcc9087693cd681918fed007"
 dependencies = [
- "arity-parser",
+ "arity-parser 0.5.3",
  "rowan",
 ]
 
 [[package]]
 name = "arity-parser"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d32d5da6a4aae812549cc366f090e048331e52a60d2de34cd36edb01fddedb8"
+checksum = "53417246066df2be8c2a46e23aedfc2d094c014c8a28463e2b84a8be5b4ed453"
+dependencies = [
+ "rowan",
+ "serde",
+ "smol_str",
+]
+
+[[package]]
+name = "arity-parser"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f198aa1c369836b9affa5d0b9b0da5070acc20023d75307b2fd7626583dfb4a9"
 dependencies = [
  "rowan",
  "serde",
@@ -406,7 +417,7 @@ name = "mini-roxygen-core"
 version = "0.1.0"
 dependencies = [
  "arity-formatter",
- "arity-parser",
+ "arity-parser 0.6.0",
  "insta",
  "pulldown-cmark",
  "rd-ast",
