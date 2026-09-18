@@ -71,10 +71,14 @@ pub(crate) fn load(root: &Path) -> Result<Option<LoadedConfig>, ConfigError> {
             });
         }
     };
-    let (entries, registrars) = parse_config(&text).map_err(|message| ConfigError::Malformed {
-        path: path.clone(),
-        message,
-    })?;
+    // `SourceFile::new` removes one leading UTF-8 BOM, so TOML spans must be
+    // computed from the same normalized text to remain aligned with it.
+    let toml_text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+    let (entries, registrars) =
+        parse_config(toml_text).map_err(|message| ConfigError::Malformed {
+            path: path.clone(),
+            message,
+        })?;
     Ok(Some(LoadedConfig {
         entries,
         registrars,
@@ -290,6 +294,22 @@ mod tests {
             Some(r#""\\code{λ}\nnext""#)
         );
         assert_eq!(entry.value, "\\code{λ}\nnext");
+    }
+
+    #[test]
+    fn bom_prefixed_configuration_spans_match_the_normalized_source() {
+        let root =
+            write_config("\u{FEFF}[inline-r.substitutions]\n'custom()' = \"\\\\code{λ}\\nnext\"\n");
+        let loaded = load(root.path())
+            .expect("configuration should load")
+            .expect("config");
+        let entry = &loaded.entries["custom()"];
+        assert_eq!(
+            loaded.source.text_range(entry.span),
+            Some(r#""\\code{λ}\nnext""#)
+        );
+        assert_eq!(entry.value, "\\code{λ}\nnext");
+        assert!(loaded.source.had_utf8_bom());
     }
 
     #[test]
