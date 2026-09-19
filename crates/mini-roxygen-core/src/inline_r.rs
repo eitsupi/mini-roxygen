@@ -301,7 +301,7 @@ fn validate_fragment(key: &str, value: &str) -> Result<Vec<RdNode>, String> {
     if let Err(error) = rd_writer::write_document(&fragment) {
         let location = error
             .ast_path()
-            .and_then(|path| fragment_writer_extent(path, tagged, parsed.source_map()))
+            .and_then(|path| fragment_writer_extent(path, parsed.source_map()))
             .and_then(|extent| extent.start.checked_sub(r"\description{".len()))
             .map_or_else(String::new, |offset| format!(" at byte {offset}"));
         return Err(format!("Rd writer error{location}: {error}"));
@@ -312,7 +312,6 @@ fn validate_fragment(key: &str, value: &str) -> Result<Vec<RdNode>, String> {
 
 fn fragment_writer_extent(
     path: &rd_ast::RdAstPath,
-    wrapper: &rd_ast::RdTagged,
     source_map: &rd_source::RdSourceMap,
 ) -> Option<std::ops::Range<usize>> {
     use rd_ast::RdAstPathSegment;
@@ -320,65 +319,83 @@ fn fragment_writer_extent(
     let [RdAstPathSegment::TopLevel(index), rest @ ..] = path.segments() else {
         return None;
     };
-    if *index >= wrapper.children().len() {
-        return None;
-    }
-    let mut node = &wrapper.children()[*index];
-    let mut option_children: Option<&[rd_ast::RdNode]> = None;
-    for (position, segment) in rest.iter().enumerate() {
-        match segment {
-            RdAstPathSegment::Child(child) => {
-                node = match option_children.take() {
-                    Some(children) => children.get(*child)?,
-                    None => match node {
-                        rd_ast::RdNode::Tagged(tagged) => tagged.children().get(*child)?,
-                        rd_ast::RdNode::Group(group) => group.children().get(*child)?,
-                        _ => return None,
-                    },
-                };
-            }
-            RdAstPathSegment::Option => {
-                if option_children.is_some() {
-                    return None;
-                }
-                option_children = Some(node.as_tagged()?.option()?);
-                if position + 1 == rest.len() {
-                    break;
-                }
-            }
-            RdAstPathSegment::TopLevel(_) => return None,
-            _ => return None,
-        }
-    }
-    if option_children.is_some() && !matches!(rest.last(), Some(RdAstPathSegment::Option)) {
-        return None;
-    }
     let mut segments = vec![
         RdAstPathSegment::TopLevel(0),
         RdAstPathSegment::Child(*index),
     ];
     for segment in rest {
-        if matches!(segment, RdAstPathSegment::TopLevel(_)) {
-            return None;
+        match segment {
+            RdAstPathSegment::Child(_) | RdAstPathSegment::Option => {
+                segments.push(segment.clone());
+            }
+            RdAstPathSegment::TopLevel(_) => return None,
+            _ => return None,
         }
-        segments.push(segment.clone());
     }
     let mapped = rd_ast::RdAstPath::new(segments);
-    let extent = source_map.span(&mapped)?.bytes();
-    let wrapper_extent = source_map.span(&rd_ast::RdAstPath::new(vec![]))?.bytes();
-    (extent.start >= wrapper_extent.start && extent.end <= wrapper_extent.end).then_some(extent)
+    source_map.span(&mapped).map(|span| span.bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
-    use rd_ast::RdDocument;
+    use rd_ast::{RdAstPath, RdAstPathSegment, RdDocument};
     use rd_writer::Writer;
 
-    use super::{InlineRSession, InlineRSubstitutions, InlineRUsage};
+    use super::{InlineRSession, InlineRSubstitutions, InlineRUsage, fragment_writer_extent};
     use crate::diagnostic::DiagnosticCode;
     use crate::source::{Spanned, TextRange};
+
+    #[test]
+    fn fragment_writer_paths_project_through_the_wrapper_source_map() {
+        let input = r"\description{\link[alt]{\strong{nested}}\link[]{second}}";
+        let parsed = rd_source::parse(input.as_bytes()).expect("fixture should parse");
+        let first = RdAstPath::new(vec![RdAstPathSegment::TopLevel(0)]);
+        let second = RdAstPath::new(vec![RdAstPathSegment::TopLevel(1)]);
+
+        let assert_text = |path: &RdAstPath, expected: &str| {
+            let extent = fragment_writer_extent(path, parsed.source_map()).expect("mapped span");
+            assert_eq!(&input.as_bytes()[extent], expected.as_bytes());
+        };
+        assert_text(&first, r"\link[alt]{\strong{nested}}");
+        assert_text(&second, r"\link[]{second}");
+        assert_text(&first.with_option(), "[alt]");
+        assert_text(&second.with_option(), "[]");
+        assert_text(&first.with_child(0), r"\strong{nested}");
+        assert_text(&first.with_child(0).with_child(0), "nested");
+
+        assert!(fragment_writer_extent(&RdAstPath::new(Vec::new()), parsed.source_map()).is_none());
+        assert!(
+            fragment_writer_extent(
+                &RdAstPath::new(vec![RdAstPathSegment::Child(0)]),
+                parsed.source_map()
+            )
+            .is_none()
+        );
+        assert!(
+            fragment_writer_extent(
+                &RdAstPath::new(vec![
+                    RdAstPathSegment::TopLevel(0),
+                    RdAstPathSegment::TopLevel(0),
+                ]),
+                parsed.source_map()
+            )
+            .is_none()
+        );
+        assert!(
+            fragment_writer_extent(
+                &RdAstPath::new(vec![RdAstPathSegment::TopLevel(99)]),
+                parsed.source_map()
+            )
+            .is_none()
+        );
+        assert!(fragment_writer_extent(&first.with_child(99), parsed.source_map()).is_none());
+        assert!(
+            fragment_writer_extent(&second.with_option().with_option(), parsed.source_map())
+                .is_none()
+        );
+    }
 
     #[test]
     fn lifecycle_badges_match_the_rendered_fragments_for_all_stages() {
