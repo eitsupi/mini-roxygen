@@ -41,5 +41,6 @@ pub(in crate::model) use lookup::{
 };
 pub(in crate::model) use slots::{
     DuplicateSlotKind, emit_duplicate, emit_duplicate_method, set_field, set_tag,
+    set_tag_deduplicate_equal,
 };
 pub(in crate::model) use usage::{resolve_explicit_usage, resolve_formal_names, resolve_usage};

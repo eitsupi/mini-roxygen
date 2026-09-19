@@ -144,6 +144,19 @@ pub struct CallFact {
     /// Typed analysis of an S7 `new_class` call, including source-aware
     /// refusals for recognized but unsupported shapes.
     pub s7_class: S7ClassAnalysis,
+    /// Whether this call is a direct manual R6 generator constructor.
+    pub r6_class: R6ClassAnalysis,
+}
+
+/// Static callee classification for the supported manual R6 generator shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum R6ClassAnalysis {
+    /// The call is not an R6 generator constructor.
+    NotApplicable,
+    /// The explicitly namespaced `R6::R6Class` spelling.
+    Explicit,
+    /// The bare `R6Class` spelling, which requires package-wide import evidence.
+    Bare,
 }
 
 /// The result of classifying a call as an S7 constructor shape.
@@ -376,11 +389,27 @@ fn call_fact(call: CallExpr, file_id: FileId, span: Span) -> CallFact {
         .map(|argument| call_argument(argument, file_id))
         .collect::<Vec<_>>();
     let s7_class = s7_class_analysis(span, &callee, &arguments);
+    let r6_class = r6_class_analysis(&callee);
     CallFact {
         span,
         callee,
         arguments,
         s7_class,
+        r6_class,
+    }
+}
+
+fn r6_class_analysis(
+    callee: &Option<Spanned<Result<CallCallee, RNameDecodeError>>>,
+) -> R6ClassAnalysis {
+    match callee.as_ref().and_then(|value| value.value.as_ref().ok()) {
+        Some(CallCallee::Simple(name)) if name.as_str() == "R6Class" => R6ClassAnalysis::Bare,
+        Some(CallCallee::Namespace {
+            package,
+            name,
+            internal: false,
+        }) if package.as_str() == "R6" && name.as_str() == "R6Class" => R6ClassAnalysis::Explicit,
+        _ => R6ClassAnalysis::NotApplicable,
     }
 }
 
@@ -540,8 +569,8 @@ fn namespace_callee(
 mod tests {
     use crate::arity_adapter::test_support::{assignment, parsed, value_variant};
     use crate::arity_adapter::{
-        AssignmentOperator, AssignmentTarget, AssignmentValue, CallCallee, S7ClassAnalysis,
-        S7ClassRefusalReason, TopLevelShape,
+        AssignmentOperator, AssignmentTarget, AssignmentValue, CallCallee, R6ClassAnalysis,
+        S7ClassAnalysis, S7ClassRefusalReason, TopLevelShape,
     };
     #[test]
     fn canonicalizes_all_supported_binding_spellings() {
@@ -820,6 +849,27 @@ foo()
             source.text_range(call.callee.as_ref().unwrap().span.range),
             Some("pkg::second")
         );
+    }
+
+    #[test]
+    fn classifies_direct_r6_generators_without_using_the_constructor_name() {
+        for (source_text, expected) in [
+            ("Widget <- R6Class(\"IgnoredName\")", R6ClassAnalysis::Bare),
+            (
+                "Widget <- R6::R6Class(\"IgnoredName\")",
+                R6ClassAnalysis::Explicit,
+            ),
+            ("Widget <- make_class()", R6ClassAnalysis::NotApplicable),
+        ] {
+            let (parsed, _) = parsed(&format!("{source_text}\n"));
+            let TopLevelShape::Assignment(assignment) = &parsed.top_level[0].fact.shape else {
+                panic!("expected assignment for {source_text}");
+            };
+            let AssignmentValue::Call(call) = &assignment.value else {
+                panic!("expected call assignment for {source_text}");
+            };
+            assert_eq!(call.r6_class, expected, "{source_text}");
+        }
     }
 
     #[test]

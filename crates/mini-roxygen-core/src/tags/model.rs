@@ -209,6 +209,22 @@ pub struct ParamName(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocName(pub String);
 
+/// A validated documentation type name supplied by `@docType`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DocType(String);
+
+impl DocType {
+    pub(crate) fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    /// Returns the documentation type name.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A documentation keyword.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Keyword(pub String);
@@ -342,6 +358,13 @@ pub struct UnknownTag {
     pub full_span: Span,
 }
 
+/// A package-local R source file requested by `@include`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeDirective {
+    /// Requested file names with the source span of each word.
+    pub files: Vec<Spanned<String>>,
+}
+
 /// A recognized NAMESPACE tag whose value remains opaque for a later lowering layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NamespaceTag {
@@ -414,8 +437,12 @@ pub enum ParsedTag {
     Name(TagValue<PlainText>),
     /// A plain Rd file name.
     RdName(TagValue<PlainText>),
+    /// A single validated documentation type name.
+    DocType(TagValue<DocType>),
     /// Documentation aliases split into source-backed words.
     Aliases(TagValue<AliasDirective>),
+    /// Package-local R source files to include in the source-order contract.
+    Include(TagValue<IncludeDirective>),
     /// Documentation keywords split into source-backed words.
     Keywords(FieldTag<Vec<Spanned<Keyword>>>),
     /// Suppresses Rd output for the documented object.
@@ -676,6 +703,78 @@ mod tests {
             diagnostics.iter().next().expect("diagnostic").code,
             DiagnosticCode::TagParseError
         );
+    }
+
+    #[test]
+    fn doc_type_is_a_single_typed_name_with_explicit_origin() {
+        let (tags, diagnostics, source) = parsed(
+            r#"#' @docType class
+"#,
+            UnknownTagPolicy::Warn,
+        );
+        assert!(diagnostics.is_empty());
+        let ParsedTag::DocType(value) = &tags[0] else {
+            panic!("expected docType");
+        };
+        assert_eq!(value.value.as_str(), "class");
+        let TagOrigin::Explicit {
+            name, value_span, ..
+        } = &value.origin
+        else {
+            panic!("expected explicit origin");
+        };
+        assert_eq!(name.value, "docType");
+        assert_eq!(source.text_range(value_span.range), Some(" class"));
+    }
+
+    #[test]
+    fn doc_type_rejects_empty_and_multiple_names() {
+        for source in ["#' @docType\n", "#' @docType class import\n"] {
+            let (tags, diagnostics, _) = parsed(source, UnknownTagPolicy::Warn);
+            assert!(tags.is_empty());
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(
+                diagnostics.iter().next().expect("diagnostic").code,
+                DiagnosticCode::TagParseError
+            );
+        }
+    }
+
+    #[test]
+    fn include_is_typed_and_rejects_non_local_paths() {
+        let (tags, diagnostics, source) = parsed(
+            r#"#' @include type.R other.r
+"#,
+            UnknownTagPolicy::Warn,
+        );
+        assert!(diagnostics.is_empty());
+        let ParsedTag::Include(value) = &tags[0] else {
+            panic!("expected include");
+        };
+        assert_eq!(
+            value
+                .value
+                .files
+                .iter()
+                .map(|file| file.value.as_str())
+                .collect::<Vec<_>>(),
+            ["type.R", "other.r"]
+        );
+        assert_eq!(
+            source.text_range(value.value.files[0].span.range),
+            Some("type.R")
+        );
+
+        for path in ["sub/foo.R", "./foo.R", "C:/foo.R", "C:\\foo.R", "../foo.R"] {
+            let (tags, diagnostics, _) =
+                parsed(&format!("#' @include {path}\n"), UnknownTagPolicy::Warn);
+            assert!(tags.is_empty(), "accepted invalid include path {path}");
+            assert_eq!(diagnostics.len(), 1, "missing diagnostic for {path}");
+            assert_eq!(
+                diagnostics.iter().next().expect("diagnostic").code,
+                DiagnosticCode::TagParseError
+            );
+        }
     }
 
     #[test]

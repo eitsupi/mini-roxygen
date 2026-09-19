@@ -153,6 +153,10 @@ define_diagnostic_codes! {
     AmbiguousS3Registration, "ambiguous-s3-registration", Error,
     /// A documented registered S3 method has no export or load-time suppression.
     UnexportedS3Method, "unexported-s3-method", Warning,
+    /// An @include target is not present in the package's R source set.
+    MissingIncludedFile, "missing-included-file", Warning,
+    /// A bare R6Class assignment has no package-wide import evidence.
+    UnresolvedR6Generator, "unresolved-r6-generator", Error,
     /// A NULL S3 export tag has no statically known registration metadata.
     UnresolvedS3MethodMetadata, "unresolved-s3-method-metadata", Error,
     /// An unmanaged generated output would be overwritten.

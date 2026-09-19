@@ -56,7 +56,7 @@ guaranteed.
 | Inline `` `r ` `` expressions                 | Partial (substitutions are configurable)             |
 | Data objects                                  | Partial (no generated `@format`)                     |
 | Repeated scalar tags                          | Partial (one value per topic, no concatenation)      |
-| R6                                            | Not supported                                        |
+| R6                                            | Partial (documented static `R6Class` assignments)    |
 | `@eval`, `@template`, `@includeRmd`, `\Sexpr` | Not supported                                        |
 
 [Compatibility with roxygen2](#compatibility-with-roxygen2) explains each
@@ -142,7 +142,7 @@ semantic compatibility guarantee.
 The documentation model supports the usual scalar and structured Rd fields:
 `@title`, `@description`, `@details`, `@return`/`@returns`, `@seealso`,
 `@references`, `@note`, `@format`, `@source`, `@author`, `@param`, `@name`,
-`@rdname`, `@aliases`, `@keywords`, `@examples`, `@examplesIf`, `@usage`,
+`@rdname`, `@docType`, `@aliases`, `@include`, `@keywords`, `@examples`, `@examplesIf`, `@usage`,
 `@section`, `@order`, `@method`, `@noRd`, `@inherit`, `@inheritParams`, and
 `@inheritSection`. Multiple contributions are merged with source-aware
 diagnostics for conflicts, missing parameters, cycles, and ambiguous
@@ -196,14 +196,16 @@ options that supply the paths.
 
 ### One value per field
 
-Each scalar prose field can have only one value per topic, including `@seealso`,
-`@references`, `@note`, and `@author`. This is a compatibility boundary:
+Each scalar prose field can have only one value per topic, including `@docType`,
+`@seealso`, `@references`, `@note`, and `@author`. This is a compatibility boundary:
 implicit concatenation across repeated tags is not performed.
 
 Put related entries in one Markdown body, usually a paragraph or a Markdown
 list, instead of repeating the tag. The same rule applies when blocks are
 merged with `@rdname`. A repeated valid value produces a source-aware
 `DuplicateTag` error, and the first value is retained while diagnostics are collected.
+Equal `@docType` values from blocks merged by `@rdname` are deduplicated;
+different values remain an explicit conflict.
 Empty or invalid tags are reported as parse diagnostics and do not
 consume the slot. `@seealso NULL` suppresses package fallback documentation.
 It does not erase an explicit value from another block.
@@ -269,10 +271,12 @@ Multiple explicit single-value contributions are errors. `Collate` fields do not
 reorder the source files. Their presence is retained only for the static
 namespace and S3 ordering checks that need it.
 
-**Data-object topics** receive static `\docType{data}`, usage, and `datasets`
-keyword output. The automatic format description that roxygen2 obtains by
-evaluating an object is not generated. Without an explicit format, inherited
-format, or `@format NULL`, mini-roxygen emits a `missing-data-format` warning.
+**Data-object topics** receive static `\docType{data}` by default, usage, and
+`datasets` keyword output. An explicit `@docType` replaces the inferred
+document type while preserving the topic's data-object behavior. The automatic
+format description that roxygen2 obtains by evaluating an object is not
+generated. Without an explicit format, inherited format, or `@format NULL`,
+mini-roxygen emits a `missing-data-format` warning.
 
 **S3 generic discovery** combines installed package metadata with a static base
 catalog checked against R 4.5.3 and R 4.6.1. The catalog resolves base
@@ -301,13 +305,18 @@ General inline R evaluation is also unsupported. Inline `` `Rd ` `` expressions 
 executable R code blocks are not run.
 
 These roxygen2 tags are not implemented: `@concept`, `@describeIn`,
-`@docType`, `@example`, `@include`, `@inheritDotParams`, `@rawRd`, and
-`@slot`. Using one produces an `unknown-tag` warning and the run continues, so
+`@example`, `@inheritDotParams`, `@rawRd`, and `@slot`. Using one
+produces an `unknown-tag` warning and the run continues, so
 the omission is visible rather than silent. The tags listed under
 [Supported tags](#supported-tags) are the ones the model accepts.
 
 `@noMd` is diagnosed because Markdown is always enabled. `@md` is accepted only
 as a redundant declaration of that mode.
+
+`@include` accepts package-local `.R` filenames and validates that each target
+exists in the registered source set. It does not reorder sources or rewrite
+DESCRIPTION `Collate`. Static manual R6 topics recognize direct assignments to
+`R6::R6Class`; bare `R6Class` requires a package-wide static import.
 
 Block quotes, thematic breaks, raw HTML, and other unsupported Markdown
 constructs are diagnosed with source locations and recovered where possible.

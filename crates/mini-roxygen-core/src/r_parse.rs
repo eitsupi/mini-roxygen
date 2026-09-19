@@ -6,8 +6,8 @@
 
 use crate::arity_adapter::{
     AssignmentFact, AssignmentOperator, AssignmentTarget, AssignmentValue, BindingName, BlockId,
-    CallFact, Formal, FormalError, ParsedFile, RName, RNameDecodeError, S7ClassAnalysis,
-    S7ClassFact, S7ClassRefusal, TopLevelFact, TopLevelShape,
+    CallFact, Formal, FormalError, ParsedFile, R6ClassAnalysis, RName, RNameDecodeError,
+    S7ClassAnalysis, S7ClassFact, S7ClassRefusal, TopLevelFact, TopLevelShape,
 };
 use crate::source::{FileId, Span, Spanned};
 
@@ -193,6 +193,28 @@ pub enum NonFunctionValue {
     Literal,
     /// Any other non-function expression.
     Other,
+}
+
+/// Returns the direct R6 constructor classification of an assignment target.
+pub(crate) fn r6_class_analysis(target: &BlockTarget) -> Option<R6ClassAnalysis> {
+    let BlockTarget::ValueAssignment(value) = target else {
+        return None;
+    };
+    let NonFunctionValue::Call(call) = &value.value else {
+        return None;
+    };
+    (!matches!(call.r6_class, R6ClassAnalysis::NotApplicable)).then_some(call.r6_class)
+}
+
+/// Returns the call span for a direct R6 constructor assignment.
+pub(crate) fn r6_class_span(target: &BlockTarget) -> Option<Span> {
+    let BlockTarget::ValueAssignment(value) = target else {
+        return None;
+    };
+    let NonFunctionValue::Call(call) = &value.value else {
+        return None;
+    };
+    (!matches!(call.r6_class, R6ClassAnalysis::NotApplicable)).then_some(call.span)
 }
 
 /// A syntactic association that needs a later layer to decide whether manual

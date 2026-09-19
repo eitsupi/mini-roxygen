@@ -72,6 +72,36 @@ pub(in crate::model) fn set_tag<T: Clone>(
     set_single(slot, destination, value, diagnostics);
 }
 
+pub(in crate::model) fn set_tag_deduplicate_equal<T: Clone + PartialEq>(
+    slot: &'static str,
+    destination: &mut Option<TagValue<T>>,
+    value: TagValue<T>,
+    block_slots: &mut BTreeSet<&'static str>,
+    block_slot_origins: &mut BTreeMap<&'static str, TagOrigin>,
+    diagnostics: &mut Diagnostics,
+) {
+    if !reserve_block_slot(
+        slot,
+        value.origin.clone(),
+        block_slots,
+        block_slot_origins,
+        diagnostics,
+    ) {
+        return;
+    }
+    match destination {
+        None => *destination = Some(value),
+        Some(previous) if previous.value == value.value => {}
+        Some(_) => emit_duplicate(
+            diagnostics,
+            slot,
+            value.origin.clone(),
+            destination.as_ref().map(|old| old.origin.clone()),
+            DuplicateSlotKind::Topic,
+        ),
+    }
+}
+
 fn reserve_block_slot(
     slot: &'static str,
     origin: TagOrigin,

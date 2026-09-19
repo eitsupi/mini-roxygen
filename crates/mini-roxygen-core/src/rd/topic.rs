@@ -217,15 +217,19 @@ pub(crate) fn build(
     };
     let mut builder = OriginBuilder::new();
     builder.append_nodes(render_header(topic, sources));
-    if matches!(
-        topic.kind,
-        crate::model::RdTopicKind::Package | crate::model::RdTopicKind::Data
-    ) {
-        let doc_type_text = builder.text_child(match topic.kind {
-            crate::model::RdTopicKind::Package => "package",
-            crate::model::RdTopicKind::Data => "data",
-            crate::model::RdTopicKind::Ordinary => unreachable!(),
-        });
+    let inferred_doc_type = match topic.kind {
+        crate::model::RdTopicKind::Package => Some("package"),
+        crate::model::RdTopicKind::Data => Some("data"),
+        crate::model::RdTopicKind::Ordinary => None,
+    };
+    if topic.doc_type.is_some() || inferred_doc_type.is_some() {
+        let doc_type_text = builder.text_child(topic.doc_type.as_ref().map_or_else(
+            || inferred_doc_type.expect("inferred doc type"),
+            |value| value.value.as_str(),
+        ));
+        if let Some(value) = &topic.doc_type {
+            builder.record(doc_type_text, &tag_origin_spans(&value.origin));
+        }
         let doc_type = sections::plain(
             &mut builder,
             RdTag::DocType,

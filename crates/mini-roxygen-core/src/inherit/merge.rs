@@ -42,6 +42,7 @@ fn resolved_topic(topic: &RdTopic, view: InheritableTopic) -> ResolvedRdTopic {
     ResolvedRdTopic {
         name: topic.name.clone(),
         kind: topic.kind,
+        doc_type: topic.doc_type.clone(),
         kind_origin: topic.kind_origin.map(|origin| origin.span),
         kind_conflict_reported: topic.kind_conflict_reported,
         blocks: topic.blocks.clone(),

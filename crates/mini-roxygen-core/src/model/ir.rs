@@ -11,8 +11,8 @@ use crate::r_parse::{BindingFact, BlockTarget};
 use crate::s3_register::S3RegistrationFact;
 use crate::source::{FileId, Span, Spanned};
 use crate::tags::{
-    DocName, ExamplesContent, InheritFields, InheritTarget, Keyword, MarkdownText, NamespaceTag,
-    ParamName, ParsedTag, RCodeText, TagOrigin, TagValue,
+    DocName, DocType, ExamplesContent, InheritFields, InheritTarget, Keyword, MarkdownText,
+    NamespaceTag, ParamName, ParsedTag, RCodeText, TagOrigin, TagValue,
 };
 use crate::usage::GeneratedUsage;
 
@@ -103,6 +103,8 @@ pub struct RdTopic {
     pub name: DocName,
     /// Whether this is the package-level documentation topic.
     pub kind: RdTopicKind,
+    /// The explicit documentation type, when supplied by `@docType`.
+    pub doc_type: Option<TagValue<DocType>>,
     /// The first package/data contribution that established a non-ordinary
     /// kind. This remains available even when aliases are suppressed.
     pub(crate) kind_origin: Option<TopicKindOrigin>,
@@ -225,9 +227,9 @@ pub enum RdTopicKind {
     /// An ordinary object topic.
     #[default]
     Ordinary,
-    /// A data object topic, which emits `\\docType{data}`.
+    /// A data object topic, which defaults to `\\docType{data}`.
     Data,
-    /// A package-level topic, which emits `\\docType{package}`.
+    /// A package-level topic, which defaults to `\\docType{package}`.
     Package,
 }
 
@@ -242,6 +244,7 @@ impl RdTopic {
         Self {
             name,
             kind: RdTopicKind::Ordinary,
+            doc_type: None,
             kind_origin: None,
             kind_conflict_reported: false,
             blocks: Vec::new(),

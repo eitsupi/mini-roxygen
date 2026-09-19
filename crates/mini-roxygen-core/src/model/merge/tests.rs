@@ -8,6 +8,7 @@ use crate::diagnostic::DiagnosticCode;
 use crate::model::test_support::{blocks, model, model_with_tag_diagnostics};
 use crate::model::{FormalNames, ResolvedUsage};
 use crate::package::{PackageInputs, PackageMetadata};
+use crate::source::SourceMap;
 use crate::tags::NamespaceTag;
 
 fn package_model_with_description(source: &str, description: &str) -> super::ModelOutput {
@@ -805,6 +806,225 @@ f <- function() f
         .expect("exact repeat diagnostic");
     assert_eq!(duplicate.primary.message, "second @seealso contribution");
     assert_eq!(duplicate.secondary.len(), 1);
+    assert_ne!(duplicate.primary.span, duplicate.secondary[0].span);
+}
+
+#[test]
+fn same_doc_type_value_across_blocks_is_deduplicated() {
+    let output = model(
+        r#"#' First topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType class
+second <- function() second
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("shared".into())];
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != DiagnosticCode::DuplicateTag)
+    );
+}
+
+#[test]
+fn include_targets_are_checked_against_registered_r_sources() {
+    let output = model(
+        r#"#' Included class
+#' @include type.R
+#' @docType class
+Widget <- R6Class("Ignored")
+"#,
+    );
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        .expect("missing include warning");
+    assert_eq!(diagnostic.primary.message, "included R file is missing");
+}
+
+#[test]
+fn bare_r6_generators_require_package_wide_import_evidence() {
+    let without_import = model(
+        r#"#' Bare generator
+Widget <- R6Class("Ignored")
+"#,
+    );
+    assert!(without_import.package.topics.is_empty());
+    let diagnostic = without_import
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnresolvedR6Generator)
+        .expect("unresolved bare generator diagnostic");
+    assert!(
+        diagnostic
+            .help
+            .as_deref()
+            .is_some_and(|help| help.contains("R6::R6Class"))
+    );
+
+    let with_import = model(
+        r#"#' @importFrom R6 R6Class
+#' @title Bare generator
+Widget <- R6Class("Ignored")
+"#,
+    );
+    assert!(
+        with_import
+            .package
+            .topics
+            .contains_key(&TopicKey("Widget".into()))
+    );
+
+    let explicit = model(
+        r#"#' Explicit generator
+Widget <- R6::R6Class("Ignored")
+"#,
+    );
+    assert!(
+        explicit
+            .package
+            .topics
+            .contains_key(&TopicKey("Widget".into()))
+    );
+
+    let recovered = model(
+        r#"#' Explicit manual topic
+#' @name Recovered
+Widget <- R6Class("Ignored")
+"#,
+    );
+    assert!(
+        recovered
+            .package
+            .topics
+            .contains_key(&TopicKey("Recovered".into()))
+    );
+}
+
+#[test]
+fn include_does_not_match_a_basename_in_a_nested_source_path() {
+    let mut sources = SourceMap::new();
+    let _ = blocks(&mut sources, "sub/foo.R", "helper <- function() NULL\n");
+    let documentation = blocks(
+        &mut sources,
+        "R/main.R",
+        r#"#' Main topic
+#' @include foo.R
+main <- function() NULL
+"#,
+    );
+    let output = build_package_model(&sources, documentation);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+    );
+}
+
+#[test]
+fn arrow_shaped_r6_topics_merge_aliases_and_exports_without_empty_sections() {
+    let output = model(
+        r#"#' @importFrom R6 R6Class
+#' @rdname ArrowType
+#' @docType class
+#' @usage NULL
+#' @format NULL
+#' @export
+ArrayType <- R6Class("IgnoredArray")
+
+#' @rdname ArrowType
+#' @docType class
+#' @usage NULL
+#' @format NULL
+#' @export
+TableType <- R6Class("IgnoredTable")
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("ArrowType".into()))
+        .expect("merged R6 topic");
+    assert_eq!(
+        topic
+            .aliases
+            .iter()
+            .map(|alias| alias.name.0.as_str())
+            .collect::<Vec<_>>(),
+        ["ArrayType", "TableType"]
+    );
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    assert!(
+        topic
+            .usages
+            .iter()
+            .all(|usage| matches!(usage.usage, ResolvedUsage::Suppressed(_)))
+    );
+    assert!(topic.format.is_none());
+    assert!(output.diagnostics.is_empty());
+
+    let namespace = crate::namespace::build_namespace(&output.package, None);
+    assert!(namespace.diagnostics.is_empty());
+    assert!(namespace.content.contains("export(ArrayType)"));
+    assert!(namespace.content.contains("export(TableType)"));
+}
+
+#[test]
+fn export_only_r6_generators_keep_namespace_without_topics() {
+    let output = model(
+        r#"#' @importFrom R6 R6Class
+#' @export
+HiddenGenerator <- R6Class("Ignored")
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert_eq!(output.package.namespace.len(), 2);
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn conflicting_doc_type_values_are_source_aware() {
+    let output = model(
+        r#"#' First topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType import
+second <- function() second
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("shared".into())];
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    let duplicate = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::DuplicateTag)
+        .expect("duplicate docType diagnostic");
+    assert_eq!(duplicate.primary.message, "second @docType contribution");
+    assert_eq!(duplicate.secondary.len(), 1);
+    assert_eq!(
+        duplicate.secondary[0].message,
+        "first @docType contribution"
+    );
     assert_ne!(duplicate.primary.span, duplicate.secondary[0].span);
 }
 

@@ -173,6 +173,8 @@ pub struct ResolvedRdTopic {
     pub name: DocName,
     /// Topic kind used by the Rd renderer.
     pub kind: crate::model::RdTopicKind,
+    /// The explicit documentation type, when supplied by `@docType`.
+    pub doc_type: Option<crate::tags::TagValue<crate::tags::DocType>>,
     /// Source span that established the package/data kind, when applicable.
     pub kind_origin: Option<Span>,
     /// Whether the topic had incompatible package/data contributions.
