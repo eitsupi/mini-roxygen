@@ -9,7 +9,9 @@ use std::path::Path;
 use crate::arity_adapter::RName;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label};
 use crate::package::PackageMetadata;
-use crate::r_parse::{AssociationRefusal, BindingFact, BlockTarget, ReexportObject};
+use crate::r_parse::{
+    AssociationRefusal, BindingFact, BlockTarget, NonFunctionValue, ReexportObject,
+};
 use crate::s3_register::S3RegistrationFact;
 use crate::source::{SourceMap, Span};
 use crate::tags::{ParsedTag, TagOrigin};
@@ -138,6 +140,14 @@ fn build_package_model_inner(
         let registration = implicit_object.and_then(|name| {
             bindings::registration_for_target(&package.registrations, name.as_str())
         });
+        let object_accepts_explicit_method = match &block_ref.target {
+            BlockTarget::FunctionAssignment(_) => true,
+            BlockTarget::ValueAssignment(crate::r_parse::ValueObject {
+                value: NonFunctionValue::Name(name),
+                ..
+            }) => name.value.is_ok(),
+            _ => false,
+        };
         let matching_registrations = implicit_object
             .map(|name| bindings::registration_matches(&package.registrations, name.as_str()))
             .unwrap_or_default();
@@ -154,6 +164,7 @@ fn build_package_model_inner(
                         block_ref.target,
                         BlockTarget::FunctionAssignment(_)
                     ),
+                    object_accepts_explicit_method,
                     object_spelling: implicit_object_span(&block_ref.target),
                     method: explicit_method.clone(),
                 });

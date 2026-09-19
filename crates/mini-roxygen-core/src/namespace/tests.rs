@@ -141,6 +141,96 @@ print.data.frame <- function(x) x
 }
 
 #[test]
+fn explicit_method_accepts_a_simple_function_alias() {
+    let output = namespace(
+        r#"source_function <- function(x) x
+#' @method print Alias
+#' @export
+alias <- source_function
+"#,
+    );
+
+    assert!(output.content.contains("S3method(print,Alias)"));
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn explicit_method_accepts_unresolved_and_multi_hop_aliases() {
+    let output = namespace_files(&[
+        (
+            "alias.R",
+            r#"#' @method head Alias
+#' @export
+first <- second
+"#,
+        ),
+        ("target.R", "second <- third\nthird <- missing_function\n"),
+    ]);
+
+    assert!(output.content.contains("S3method(head,Alias)"));
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn explicit_method_rejects_literal_and_call_assignments() {
+    let output = namespace(
+        r#"#' @method print Literal
+#' @export
+literal <- "value"
+
+#' @method print Called
+#' @export
+called <- factory()
+"#,
+    );
+
+    assert!(!output.content.contains("S3method("));
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == DiagnosticCode::InvalidNamespaceDirective)
+            .count(),
+        2
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == DiagnosticCode::InvalidNamespaceDirective)
+    );
+}
+
+#[test]
+fn arrow_alias_methods_emit_only_the_declared_s3_methods() {
+    let output = namespace_files(&[
+        (
+            "arrow-tabular.R",
+            r#"#' @method head ArrowTabular
+#' @export
+head.ArrowTabular <- head.ArrowDatum
+
+#' @method tail ArrowTabular
+#' @export
+tail.ArrowTabular <- tail.ArrowDatum
+"#,
+        ),
+        (
+            "schema.R",
+            r#"#' @method $<- Schema
+#' @export
+`$<-.Schema` <- `$<-.ArrowTabular`
+"#,
+        ),
+    ]);
+
+    assert!(output.content.contains("S3method(head,ArrowTabular)"));
+    assert!(output.content.contains("S3method(tail,ArrowTabular)"));
+    assert!(output.content.contains("S3method(\"$<-\",Schema)"));
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
 fn provider_classifies_ordinary_and_operator_methods() {
     let source = r#"#' @export
 print.foo <- function(x) x

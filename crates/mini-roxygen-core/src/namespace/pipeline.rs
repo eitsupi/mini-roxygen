@@ -229,7 +229,7 @@ fn collect_request(
                     return;
                 };
                 if let Some(method) = request.method.as_ref() {
-                    if !request.object_is_function {
+                    if !request.object_accepts_explicit_method {
                         invalid(
                             diagnostics,
                             &tag_name,

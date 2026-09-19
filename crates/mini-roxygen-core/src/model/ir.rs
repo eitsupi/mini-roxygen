@@ -503,6 +503,10 @@ pub struct NamespaceRequest {
     pub object: Option<RName>,
     /// Whether the block's implicit object is statically a function assignment.
     pub object_is_function: bool,
+    /// Whether an explicit `@method` may authoritatively identify this object
+    /// as a function. Simple name aliases qualify even when their target is
+    /// outside the statically available binding facts.
+    pub object_accepts_explicit_method: bool,
     /// The complete spelling span of the implicit binding name.
     pub object_spelling: Option<Span>,
     /// The block's first `@method` declaration, if present.
