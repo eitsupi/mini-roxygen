@@ -20,7 +20,7 @@ pub(crate) use ir::{
     Alias, BlockRef, DocumentedBlock, FormalContribution, FormalName, FormalNames,
     InheritanceRequest, MethodDeclaration, ModelOutput, NamedSection, NamespaceRequest,
     PackageAuthor, PackageComment, PackageIdentity, PackageLink, PackageMetadataDiagnosticState,
-    PackageModel, PackagePerson, PackageSeeAlso, ParamDescription, RdTopic, RdTopicKind,
+    PackageModel, PackagePerson, PackageSeeAlso, ParamDescription, RdTopic, RdTopicKind, Reexport,
     ResolvedUsage, UsageContribution,
 };
 pub(crate) use merge::build_package_model_with_metadata_bindings_and_registrations;
@@ -40,6 +40,6 @@ pub(in crate::model) use lookup::{
     first_name, first_order, first_rdname, has_no_rd, suppresses_default_aliases,
 };
 pub(in crate::model) use slots::{
-    DuplicateSlotKind, emit_duplicate, emit_duplicate_method, set_field, set_tag,
+    DuplicateSlotKind, emit_duplicate, emit_duplicate_method, set_doc_type, set_field, set_tag,
 };
 pub(in crate::model) use usage::{resolve_explicit_usage, resolve_formal_names, resolve_usage};

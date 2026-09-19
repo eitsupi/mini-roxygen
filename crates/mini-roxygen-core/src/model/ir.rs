@@ -11,8 +11,8 @@ use crate::r_parse::{BindingFact, BlockTarget};
 use crate::s3_register::S3RegistrationFact;
 use crate::source::{FileId, Span, Spanned};
 use crate::tags::{
-    DocName, ExamplesContent, InheritFields, InheritTarget, Keyword, MarkdownText, NamespaceTag,
-    ParamName, ParsedTag, RCodeText, TagOrigin, TagValue,
+    DocName, DocType, ExamplesContent, InheritFields, InheritTarget, Keyword, MarkdownText,
+    NamespaceTag, ParamName, ParsedTag, RCodeText, TagOrigin, TagValue,
 };
 use crate::usage::GeneratedUsage;
 
@@ -103,6 +103,10 @@ pub struct RdTopic {
     pub name: DocName,
     /// Whether this is the package-level documentation topic.
     pub kind: RdTopicKind,
+    /// The explicit documentation type, when supplied by `@docType`.
+    pub doc_type: Option<TagValue<DocType>>,
+    /// The origin of an explicit `@docType NULL` suppression, when present.
+    pub doc_type_suppressed: Option<TagOrigin>,
     /// The first package/data contribution that established a non-ordinary
     /// kind. This remains available even when aliases are suppressed.
     pub(crate) kind_origin: Option<TopicKindOrigin>,
@@ -112,6 +116,8 @@ pub struct RdTopic {
     pub blocks: Vec<BlockRef>,
     /// Aliases in first-seen order, retaining the source span of each claim.
     pub aliases: Vec<Alias>,
+    /// Statically recognized objects re-exported from other packages.
+    pub reexports: Vec<Reexport>,
     /// Keywords in first-seen order.
     pub keywords: Vec<Keyword>,
     /// The one title slot, when supplied.
@@ -225,9 +231,9 @@ pub enum RdTopicKind {
     /// An ordinary object topic.
     #[default]
     Ordinary,
-    /// A data object topic, which emits `\\docType{data}`.
+    /// A data object topic, which defaults to `\\docType{data}`.
     Data,
-    /// A package-level topic, which emits `\\docType{package}`.
+    /// A package-level topic, which defaults to `\\docType{package}`.
     Package,
 }
 
@@ -242,10 +248,13 @@ impl RdTopic {
         Self {
             name,
             kind: RdTopicKind::Ordinary,
+            doc_type: None,
+            doc_type_suppressed: None,
             kind_origin: None,
             kind_conflict_reported: false,
             blocks: Vec::new(),
             aliases: Vec::new(),
+            reexports: Vec::new(),
             keywords: Vec::new(),
             title: None,
             description: None,
@@ -312,6 +321,19 @@ impl RdTopic {
             FormalNames::NotFunction
         }
     }
+}
+
+/// One source-backed namespace-qualified object in a re-export topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reexport {
+    /// The provider package name.
+    pub package: String,
+    /// The exported member name.
+    pub name: String,
+    /// The source span of the provider package.
+    pub package_span: Span,
+    /// The source span of the member name.
+    pub name_span: Span,
 }
 
 /// One formal name of a documented function, with the span that introduced it.
@@ -481,6 +503,15 @@ pub struct NamespaceRequest {
     pub object: Option<RName>,
     /// Whether the block's implicit object is statically a function assignment.
     pub object_is_function: bool,
+    /// Whether an explicit `@method` may authoritatively identify this object
+    /// as a function. Simple name aliases qualify even when their target is
+    /// outside the statically available binding facts.
+    pub object_accepts_explicit_method: bool,
+    /// Whether the implicit object is a public static namespace re-export.
+    ///
+    /// Re-export members are already known to be ordinary exported objects;
+    /// they must not be sent through package-local S3 classification.
+    pub object_is_reexport: bool,
     /// The complete spelling span of the implicit binding name.
     pub object_spelling: Option<Span>,
     /// The block's first `@method` declaration, if present.

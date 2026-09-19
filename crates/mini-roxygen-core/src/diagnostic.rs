@@ -153,12 +153,16 @@ define_diagnostic_codes! {
     AmbiguousS3Registration, "ambiguous-s3-registration", Error,
     /// A documented registered S3 method has no export or load-time suppression.
     UnexportedS3Method, "unexported-s3-method", Warning,
+    /// An @include target is not present in the package's R source set.
+    MissingIncludedFile, "missing-included-file", Warning,
     /// A NULL S3 export tag has no statically known registration metadata.
     UnresolvedS3MethodMetadata, "unresolved-s3-method-metadata", Error,
     /// An unmanaged generated output would be overwritten.
     UnmanagedOutputOverwrite, "unmanaged-output-overwrite", Error,
     /// A NAMESPACE directive is invalid.
     InvalidNamespaceDirective, "invalid-namespace-directive", Error,
+    /// A namespace-qualified re-export uses syntax outside the static subset.
+    UnsupportedReexport, "unsupported-reexport", Error,
     /// A namespace directive imports from the package being documented, which
     /// asks R for nothing and is more often a misspelled neighbour.
     SelfImport, "self-import", Warning,

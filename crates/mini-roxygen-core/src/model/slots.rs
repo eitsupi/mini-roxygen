@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label, Severity};
 use crate::source::Spanned;
-use crate::tags::{FieldTag, FieldValue, TagOrigin, TagValue};
+use crate::tags::{DocType, FieldTag, FieldValue, TagOrigin, TagValue};
 
 pub(in crate::model) fn set_single<T: Clone>(
     slot: &'static str,
@@ -70,6 +70,49 @@ pub(in crate::model) fn set_tag<T: Clone>(
         return;
     }
     set_single(slot, destination, value, diagnostics);
+}
+
+pub(in crate::model) fn set_doc_type(
+    destination: &mut Option<TagValue<DocType>>,
+    suppressed: &mut Option<TagOrigin>,
+    value: Option<TagValue<DocType>>,
+    suppression: Option<TagOrigin>,
+    block_slots: &mut BTreeSet<&'static str>,
+    block_slot_origins: &mut BTreeMap<&'static str, TagOrigin>,
+    diagnostics: &mut Diagnostics,
+) {
+    let origin = value
+        .as_ref()
+        .map(|value| value.origin.clone())
+        .or_else(|| suppression.clone())
+        .expect("docType value or suppression has an origin");
+    if !reserve_block_slot(
+        "docType",
+        origin,
+        block_slots,
+        block_slot_origins,
+        diagnostics,
+    ) {
+        return;
+    }
+    if let Some(value) = value {
+        match destination {
+            None => {
+                *destination = Some(value);
+                *suppressed = None;
+            }
+            Some(previous) if previous.value == value.value => {}
+            Some(previous) => emit_duplicate(
+                diagnostics,
+                "docType",
+                value.origin,
+                Some(previous.origin.clone()),
+                DuplicateSlotKind::Topic,
+            ),
+        }
+    } else if destination.is_none() && suppressed.is_none() {
+        *suppressed = suppression;
+    }
 }
 
 fn reserve_block_slot(

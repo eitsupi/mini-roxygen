@@ -217,15 +217,23 @@ pub(crate) fn build(
     };
     let mut builder = OriginBuilder::new();
     builder.append_nodes(render_header(topic, sources));
-    if matches!(
-        topic.kind,
-        crate::model::RdTopicKind::Package | crate::model::RdTopicKind::Data
-    ) {
-        let doc_type_text = builder.text_child(match topic.kind {
-            crate::model::RdTopicKind::Package => "package",
-            crate::model::RdTopicKind::Data => "data",
-            crate::model::RdTopicKind::Ordinary => unreachable!(),
-        });
+    let inferred_doc_type = if topic.doc_type_suppressed.is_some() {
+        None
+    } else {
+        match topic.kind {
+            crate::model::RdTopicKind::Package => Some("package"),
+            crate::model::RdTopicKind::Data => Some("data"),
+            crate::model::RdTopicKind::Ordinary => None,
+        }
+    };
+    if topic.doc_type.is_some() || inferred_doc_type.is_some() {
+        let doc_type_text = builder.text_child(topic.doc_type.as_ref().map_or_else(
+            || inferred_doc_type.expect("inferred doc type"),
+            |value| value.value.as_str(),
+        ));
+        if let Some(value) = &topic.doc_type {
+            builder.record(doc_type_text, &tag_origin_spans(&value.origin));
+        }
         let doc_type = sections::plain(
             &mut builder,
             RdTag::DocType,
@@ -283,8 +291,12 @@ pub(crate) fn build(
             context,
             diagnostics,
         );
-    } else if !topic.description_suppressed {
-        add_spaced_fragment_section(&mut builder, RdTag::Description, title, &title_fragment);
+    } else if !topic.description_suppressed || !topic.reexports.is_empty() {
+        if topic.reexports.is_empty() {
+            add_spaced_fragment_section(&mut builder, RdTag::Description, title, &title_fragment);
+        } else {
+            add_reexport_description(&mut builder, &topic.reexports);
+        }
     }
     if let Some(value) = &topic.details {
         add_resolved_section(&mut builder, RdTag::Details, value, context, diagnostics);
@@ -361,6 +373,64 @@ pub(crate) fn build(
     }
     let content = serialize::serialize(&document, &origins, anchor, diagnostics)?;
     Some((path, document, content))
+}
+
+fn add_reexport_description(builder: &mut OriginBuilder, reexports: &[crate::model::Reexport]) {
+    let mut grouped = std::collections::BTreeMap::<&str, Vec<&crate::model::Reexport>>::new();
+    for reexport in reexports {
+        grouped
+            .entry(reexport.package.as_str())
+            .or_default()
+            .push(reexport);
+    }
+
+    let mut items = Vec::new();
+    for (package, mut values) in grouped {
+        values.sort_by(|left, right| left.name.cmp(&right.name));
+        let package_text = builder.text_child(package);
+        let item_name = builder.group_child(vec![package_text]);
+        let mut links = Vec::new();
+        for (index, value) in values.into_iter().enumerate() {
+            if index != 0 {
+                links.push(builder.text_child(", "));
+            }
+            let option = builder.text_child(format!("{}:{}", value.package, value.name));
+            let label = builder.text_child(reexport_link_label(&value.name));
+            let link = builder.tagged_child(RdTag::Link, Some(vec![option]), vec![label]);
+            builder.record(link, &[value.package_span, value.name_span]);
+            let code = builder.tagged_child(RdTag::Code, None, vec![link]);
+            links.push(code);
+        }
+        let item_body = builder.group_child(links);
+        items.push(builder.tagged_child(RdTag::Item, None, vec![item_name, item_body]));
+    }
+
+    let mut content = vec![
+        builder.text_child("These objects are imported from other packages. Follow the links\n"),
+        builder.text_child("below to see their documentation.\n"),
+        builder.text_child("\n"),
+    ];
+    let mut describe_content = vec![builder.text_child("\n")];
+    for (index, item) in items.into_iter().enumerate() {
+        if index != 0 {
+            describe_content.push(builder.text_child("\n"));
+        }
+        describe_content.push(builder.text_child("  "));
+        describe_content.push(item);
+    }
+    describe_content.push(builder.text_child("\n"));
+    let describe = builder.tagged_child(RdTag::Describe, None, describe_content);
+    content.push(describe);
+    let section = sections::spaced(builder, RdTag::Description, content, LeafKind::Text);
+    add_section(builder, section, false);
+}
+
+fn reexport_link_label(name: &str) -> String {
+    if name.starts_with('%') && name.ends_with('%') {
+        name.to_owned()
+    } else {
+        format!("{name}()")
+    }
 }
 
 fn add_package_author(builder: &mut OriginBuilder, value: &crate::model::PackageAuthor) {

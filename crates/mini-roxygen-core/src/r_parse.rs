@@ -6,8 +6,8 @@
 
 use crate::arity_adapter::{
     AssignmentFact, AssignmentOperator, AssignmentTarget, AssignmentValue, BindingName, BlockId,
-    CallFact, Formal, FormalError, ParsedFile, RName, RNameDecodeError, S7ClassAnalysis,
-    S7ClassFact, S7ClassRefusal, TopLevelFact, TopLevelShape,
+    CallFact, Formal, FormalError, NamespaceObjectFact, ParsedFile, RName, RNameDecodeError,
+    S7ClassAnalysis, S7ClassFact, S7ClassRefusal, TopLevelFact, TopLevelShape,
 };
 use crate::source::{FileId, Span, Spanned};
 
@@ -99,8 +99,23 @@ pub enum BlockTarget {
     PackageDocumentation(PackageSentinel),
     /// A top-level call retained without interpreting its callee or arguments.
     Call(CallFact),
+    /// A direct namespace-qualified object expression.
+    Reexport(ReexportObject),
     /// A syntax shape that association can retain but cannot classify further.
     Refused(AssociationRefusal),
+}
+
+/// A statically decoded public or private namespace-qualified object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReexportObject {
+    /// The complete expression span.
+    pub span: Span,
+    /// The package name and source span.
+    pub package: Spanned<RName>,
+    /// The member name and source span.
+    pub name: Spanned<RName>,
+    /// Whether the expression uses `:::` rather than `::`.
+    pub internal: bool,
 }
 
 /// Metadata for a function assigned to a simple binding.
@@ -336,9 +351,19 @@ fn block_target(fact: TopLevelFact) -> BlockTarget {
             }
         }
         TopLevelShape::Call(call) => BlockTarget::Call(call),
+        TopLevelShape::NamespaceObject(fact) => BlockTarget::Reexport(reexport_target(fact)),
         TopLevelShape::Other => {
             BlockTarget::Refused(AssociationRefusal::UnsupportedExpression { span })
         }
+    }
+}
+
+fn reexport_target(fact: NamespaceObjectFact) -> ReexportObject {
+    ReexportObject {
+        span: fact.span,
+        package: fact.package,
+        name: fact.name,
+        internal: fact.internal,
     }
 }
 

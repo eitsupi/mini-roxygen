@@ -8,6 +8,7 @@ use crate::diagnostic::DiagnosticCode;
 use crate::model::test_support::{blocks, model, model_with_tag_diagnostics};
 use crate::model::{FormalNames, ResolvedUsage};
 use crate::package::{PackageInputs, PackageMetadata};
+use crate::source::SourceMap;
 use crate::tags::NamespaceTag;
 
 fn package_model_with_description(source: &str, description: &str) -> super::ModelOutput {
@@ -805,6 +806,535 @@ f <- function() f
         .expect("exact repeat diagnostic");
     assert_eq!(duplicate.primary.message, "second @seealso contribution");
     assert_eq!(duplicate.secondary.len(), 1);
+    assert_ne!(duplicate.primary.span, duplicate.secondary[0].span);
+}
+
+#[test]
+fn same_doc_type_value_across_blocks_is_deduplicated() {
+    let output = model(
+        r#"#' First topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType class
+second <- function() second
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("shared".into())];
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != DiagnosticCode::DuplicateTag)
+    );
+}
+
+#[test]
+fn doc_type_suppression_is_order_independent_and_block_local() {
+    for source in [
+        r#"#' Shared topic
+#' @rdname shared
+#' @docType NULL
+first <- function() first
+
+#' @rdname shared
+#' @docType class
+second <- function() second
+"#,
+        r#"#' Shared topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType NULL
+second <- function() second
+"#,
+    ] {
+        let output = model(source);
+        let topic = &output.package.topics[&TopicKey("shared".into())];
+        assert_eq!(
+            topic
+                .doc_type
+                .as_ref()
+                .expect("explicit docType")
+                .value
+                .as_str(),
+            "class"
+        );
+        assert!(topic.doc_type_suppressed.is_none());
+        assert!(output.diagnostics.is_empty());
+    }
+
+    let output = model(
+        r#"#' Suppressed topic
+#' @docType NULL
+first <- function() first
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("first".into())];
+    assert!(topic.doc_type.is_none());
+    assert!(topic.doc_type_suppressed.is_some());
+
+    let (output, tag_diagnostics) = model_with_tag_diagnostics(
+        r#"#' Duplicate suppression
+#' @docType NULL
+#' @docType class
+first <- function() first
+"#,
+    );
+    assert!(
+        output.package.topics[&TopicKey("first".into())]
+            .doc_type_suppressed
+            .is_some()
+    );
+    assert!(tag_diagnostics.is_empty());
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == DiagnosticCode::DuplicateTag)
+            .count(),
+        1
+    );
+
+    let package = package_model_with_description(
+        r#"#' Package title
+#' @docType NULL
+"_PACKAGE"
+"#,
+        &package_description("person('Package Author', 'a@example.org')"),
+    );
+    let package_topic = package
+        .package
+        .topics
+        .values()
+        .find(|topic| matches!(topic.kind, super::RdTopicKind::Package))
+        .expect("package topic");
+    assert!(package_topic.doc_type.is_none());
+    assert!(package_topic.doc_type_suppressed.is_some());
+}
+
+#[test]
+fn include_targets_are_checked_against_registered_r_sources() {
+    let output = model(
+        r#"#' Included class
+#' @include type.R
+#' @docType class
+Widget <- R6Class("Ignored")
+"#,
+    );
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        .expect("missing include warning");
+    assert_eq!(diagnostic.primary.message, "included R file is missing");
+}
+
+#[test]
+fn local_r6class_function_call_is_an_ordinary_manual_value_topic() {
+    let output = model(
+        r#"R6Class <- function(...) list(...)
+
+#' Manual value topic
+Widget <- R6Class("Ignored")
+"#,
+    );
+    assert!(
+        output
+            .package
+            .topics
+            .contains_key(&TopicKey("Widget".into()))
+    );
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn include_does_not_match_a_basename_in_a_nested_source_path() {
+    let mut sources = SourceMap::new();
+    let _ = blocks(&mut sources, "sub/foo.R", "helper <- function() NULL\n");
+    let documentation = blocks(
+        &mut sources,
+        "R/main.R",
+        r#"#' Main topic
+#' @include foo.R
+main <- function() NULL
+"#,
+    );
+    let output = build_package_model(&sources, documentation);
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+    );
+}
+
+#[test]
+fn include_accepts_direct_and_r_directory_source_paths() {
+    for included_path in ["foo.R", "R/foo.R"] {
+        let mut sources = SourceMap::new();
+        let _ = blocks(&mut sources, included_path, "helper <- function() NULL\n");
+        let documentation = blocks(
+            &mut sources,
+            "R/main.R",
+            r#"#' Main topic
+#' @include foo.R
+main <- function() NULL
+"#,
+        );
+        let output = build_package_model(&sources, documentation);
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        );
+    }
+}
+
+#[test]
+fn include_validates_each_filename_with_case_sensitive_matching() {
+    let mut sources = SourceMap::new();
+    let _ = blocks(&mut sources, "R/present.R", "helper <- function() NULL\n");
+    let documentation = blocks(
+        &mut sources,
+        "R/main.R",
+        r#"#' Main topic
+#' @include present.R present.r
+main <- function() NULL
+"#,
+    );
+    let output = build_package_model(&sources, documentation);
+    let missing = output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        .collect::<Vec<_>>();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].primary.message, "included R file is missing");
+}
+
+#[test]
+fn manual_r6_topic_merges_aliases_and_exports_without_empty_sections() {
+    let output = model(
+        r#"#' @importFrom R6 R6Class
+#' @rdname shared-class-topic
+#' @docType class
+#' @usage NULL
+#' @format NULL
+#' @export
+PrimaryClass <- R6Class("IgnoredPrimary")
+
+#' @rdname shared-class-topic
+#' @docType class
+#' @usage NULL
+#' @format NULL
+#' @export
+SecondaryClass <- R6Class("IgnoredSecondary")
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("shared-class-topic".into()))
+        .expect("merged R6 topic");
+    assert_eq!(
+        topic
+            .aliases
+            .iter()
+            .map(|alias| alias.name.0.as_str())
+            .collect::<Vec<_>>(),
+        ["PrimaryClass", "SecondaryClass"]
+    );
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    assert!(
+        topic
+            .usages
+            .iter()
+            .all(|usage| matches!(usage.usage, ResolvedUsage::Suppressed(_)))
+    );
+    assert!(topic.format.is_none());
+    assert!(output.diagnostics.is_empty());
+
+    let namespace = crate::namespace::build_namespace(&output.package, None);
+    assert!(namespace.diagnostics.is_empty());
+    insta::assert_snapshot!(namespace.content, @"
+# Generated by mini-roxygen (roxygen2 compatible): do not edit by hand
+
+export(PrimaryClass)
+export(SecondaryClass)
+importFrom(R6,R6Class)
+");
+}
+
+#[test]
+fn static_namespace_reexport_builds_the_shared_topic_and_implicit_export() {
+    let output = model(
+        r#"#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("shared reexports topic");
+    assert_eq!(topic.name.0, "reexports");
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "import"
+    );
+    assert_eq!(
+        topic
+            .aliases
+            .iter()
+            .map(|alias| alias.name.0.as_str())
+            .collect::<Vec<_>>(),
+        ["reexports", "filter"]
+    );
+    assert_eq!(topic.reexports.len(), 1);
+    assert_eq!(topic.reexports[0].package, "dplyr");
+    assert_eq!(topic.reexports[0].name, "filter");
+    assert!(topic.keywords.iter().any(|keyword| keyword.0 == "internal"));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
+fn static_namespace_reexport_dotted_member_is_an_ordinary_export() {
+    let output = model(
+        r#"#' @export
+dplyr::as.data.frame
+"#,
+    );
+    let namespace = crate::namespace::build_namespace(&output.package, None);
+    insta::assert_snapshot!(namespace.content, @"
+# Generated by mini-roxygen (roxygen2 compatible): do not edit by hand
+
+export(as.data.frame)
+importFrom(dplyr,as.data.frame)
+");
+    assert!(
+        namespace.diagnostics.is_empty(),
+        "{:?}",
+        namespace.diagnostics
+    );
+}
+
+#[test]
+fn ordinary_reexports_topic_name_is_rejected_with_source_context() {
+    let output = model(
+        r#"#' @name reexports
+#' @title Ordinary topic
+ordinary <- function() NULL
+
+#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("static re-export topic");
+    assert_eq!(topic.reexports.len(), 1);
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedReexport)
+        .expect("ordinary topic collision diagnostic");
+    assert!(
+        diagnostic
+            .message
+            .contains("ordinary topic name `reexports` is reserved")
+    );
+    assert_eq!(diagnostic.secondary.len(), 1);
+}
+
+#[test]
+fn implicit_reexports_topic_name_is_rejected_with_source_context() {
+    let output = model(
+        r#"#' @title Ordinary topic
+reexports <- function() NULL
+
+#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("static re-export topic");
+    assert_eq!(topic.reexports.len(), 1);
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedReexport)
+        .expect("implicit ordinary topic collision diagnostic");
+    assert!(
+        diagnostic
+            .message
+            .contains("ordinary topic name `reexports` is reserved")
+    );
+    assert_eq!(diagnostic.secondary.len(), 1);
+}
+
+#[test]
+fn reexport_prose_is_rejected_instead_of_replacing_generated_links() {
+    let output = model(
+        r#"#' @description custom provider prose
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedReexport
+            && diagnostic
+                .message
+                .contains("cannot combine generated provider links")
+    }));
+}
+
+#[test]
+fn reexport_intro_prose_is_rejected() {
+    let output = model(
+        r#"#' Provider prose.
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == DiagnosticCode::UnsupportedReexport })
+    );
+}
+
+#[test]
+fn private_reexport_is_refused_with_source_diagnostic() {
+    let output = model(
+        r#"#' @export
+dplyr:::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedReexport)
+        .expect("private re-export diagnostic");
+    assert!(
+        diagnostic
+            .primary
+            .message
+            .contains("private namespace access")
+    );
+}
+
+#[test]
+fn reexport_topic_metadata_is_refused() {
+    for tag in ["@name custom", "@rdname custom"] {
+        let source = format!("#' {tag}\n#' @export\ndplyr::filter\n");
+        let output = model(&source);
+        assert!(output.package.topics.is_empty(), "{tag}");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == DiagnosticCode::UnsupportedReexport
+                && diagnostic.message.contains("@name or @rdname")
+        }));
+    }
+}
+
+#[test]
+fn namespace_call_is_not_mistaken_for_a_reexport() {
+    let output = model(
+        r#"#' @export
+dplyr::filter()
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    let namespace = crate::namespace::build_namespace(&output.package, None);
+    assert!(
+        namespace
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidNamespaceDirective)
+    );
+}
+
+#[test]
+fn reexport_doc_type_suppression_is_not_replaced_by_an_inferred_default() {
+    let output = model(
+        r#"#' @docType NULL
+#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("reexports topic");
+    assert!(topic.doc_type.is_none());
+    assert!(topic.doc_type_suppressed.is_some());
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
+fn export_only_r6_generators_keep_namespace_without_topics() {
+    let output = model(
+        r#"#' @importFrom R6 R6Class
+#' @export
+HiddenGenerator <- R6Class("Ignored")
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert_eq!(output.package.namespace.len(), 2);
+    assert!(output.diagnostics.is_empty());
+}
+
+#[test]
+fn conflicting_doc_type_values_are_source_aware() {
+    let output = model(
+        r#"#' First topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType import
+second <- function() second
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("shared".into())];
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "class"
+    );
+    let duplicate = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::DuplicateTag)
+        .expect("duplicate docType diagnostic");
+    assert_eq!(duplicate.primary.message, "second @docType contribution");
+    assert_eq!(duplicate.secondary.len(), 1);
+    assert_eq!(
+        duplicate.secondary[0].message,
+        "first @docType contribution"
+    );
     assert_ne!(duplicate.primary.span, duplicate.secondary[0].span);
 }
 

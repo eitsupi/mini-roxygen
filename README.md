@@ -56,7 +56,7 @@ guaranteed.
 | Inline `` `r ` `` expressions                 | Partial (substitutions are configurable)             |
 | Data objects                                  | Partial (no generated `@format`)                     |
 | Repeated scalar tags                          | Partial (one value per topic, no concatenation)      |
-| R6                                            | Not supported                                        |
+| R6                                            | Partial (documented static value assignments)        |
 | `@eval`, `@template`, `@includeRmd`, `\Sexpr` | Not supported                                        |
 
 [Compatibility with roxygen2](#compatibility-with-roxygen2) explains each
@@ -142,7 +142,7 @@ semantic compatibility guarantee.
 The documentation model supports the usual scalar and structured Rd fields:
 `@title`, `@description`, `@details`, `@return`/`@returns`, `@seealso`,
 `@references`, `@note`, `@format`, `@source`, `@author`, `@param`, `@name`,
-`@rdname`, `@aliases`, `@keywords`, `@examples`, `@examplesIf`, `@usage`,
+`@rdname`, `@docType`, `@aliases`, `@include`, `@keywords`, `@examples`, `@examplesIf`, `@usage`,
 `@section`, `@order`, `@method`, `@noRd`, `@inherit`, `@inheritParams`, and
 `@inheritSection`. Multiple contributions are merged with source-aware
 diagnostics for conflicts, missing parameters, cycles, and ambiguous
@@ -155,14 +155,27 @@ The NAMESPACE subset includes:
 - `@exportPattern`, `@exportClass`, `@exportMethod`, `@importClassesFrom`, and
   `@importMethodsFrom`.
 
+A documented top-level `pkg::name` expression is a static re-export. It is
+merged into the shared `reexports` topic, emits the provider link list, and
+adds the corresponding `importFrom(pkg, name)` and (for bare `@export`) the
+member export. Private `pkg:::name` access, computed expressions, calls, and
+re-exports with `@name` or `@rdname` are refused rather than guessed. The
+generated provider description cannot be combined with an intro,
+`@description`, or `@details` prose in the same block.
+When a static re-export exists, `reexports` is reserved for its shared topic;
+an ordinary topic using that name is rejected with a source-aware diagnostic.
+Provider links use the static label convention `name()` for ordinary names;
+infix names such as `` `%op%` `` keep their operator spelling without a
+function suffix. No runtime inspection is used to distinguish other callable
+and non-callable provider objects.
+
 The S4-related tags produce static NAMESPACE directives. They do not load R
-classes or inspect S4 method tables. Ordinary documentation can be attached to
-statically parseable R source, but runtime-generated R6 objects and methods are
-not discovered by loading a package. A minimal S7 subset recognizes literal
-`new_class()` definitions with a direct `constructor = function(...)` argument.
-These signatures are propagated through simple aliases. S7 generics, unions,
-multi-dispatch, method metadata, properties, and runtime introspection are not
-supported.
+classes or inspect S4 method tables.
+
+A minimal S7 subset recognizes literal `new_class()` definitions with a direct
+`constructor = function(...)` argument. These signatures are propagated
+through simple aliases. S7 generics, unions, multi-dispatch, method metadata,
+properties, and runtime introspection are not supported.
 
 Markdown is enabled for every documentation block. The supported conversion
 covers ordinary paragraphs, emphasis, strong text, links, inline code, lists,
@@ -196,8 +209,8 @@ options that supply the paths.
 
 ### One value per field
 
-Each scalar prose field can have only one value per topic, including `@seealso`,
-`@references`, `@note`, and `@author`. This is a compatibility boundary:
+Each scalar prose field can have only one value per topic, including
+`@seealso`, `@references`, `@note`, and `@author`. This is a compatibility boundary:
 implicit concatenation across repeated tags is not performed.
 
 Put related entries in one Markdown body, usually a paragraph or a Markdown
@@ -211,6 +224,12 @@ It does not erase an explicit value from another block.
 `@examples` and `@examplesIf` share one topic-wide slot and are likewise not
 concatenated. When an examples section needs multiple parts or conditions, put
 them in one body with blank lines, comments, or an explicit R `if` statement.
+
+`@docType` is a typed topic directive. `@docType NULL` suppresses inferred
+ordinary/data/package output; explicit values take precedence over suppression.
+Equal explicit values merged by `@rdname` are deduplicated, while conflicting
+values remain source-aware errors. A duplicate within one block is still an
+error.
 
 ### Static subsets
 
@@ -269,10 +288,25 @@ Multiple explicit single-value contributions are errors. `Collate` fields do not
 reorder the source files. Their presence is retained only for the static
 namespace and S3 ordering checks that need it.
 
-**Data-object topics** receive static `\docType{data}`, usage, and `datasets`
-keyword output. The automatic format description that roxygen2 obtains by
-evaluating an object is not generated. Without an explicit format, inherited
-format, or `@format NULL`, mini-roxygen emits a `missing-data-format` warning.
+**Data-object topics** receive static `\docType{data}` by default, usage, and
+`datasets` keyword output. An explicit `@docType` replaces the inferred
+document type while preserving the topic's data-object behavior. The automatic
+format description that roxygen2 obtains by evaluating an object is not
+generated. Without an explicit format, inherited format, or `@format NULL`,
+mini-roxygen emits a `missing-data-format` warning.
+
+**R6 classes** are supported when their documentation is written explicitly
+and the class can be handled as a static value assignment. For example, a
+top-level assignment such as `Widget <- R6Class(...)` can use ordinary tags
+including `@title`, `@description`, `@docType class`, `@usage NULL`,
+`@format NULL`, `@section`, `@rdname`, `@aliases`, and `@export`. mini-roxygen
+does not specially parse or evaluate `R6Class()` or inspect its arguments and
+body. It does not automatically generate documentation for public or private
+methods, fields, active bindings, inheritance, or member sections. Packages
+that disable roxygen2's automatic R6 documentation and maintain their class
+documentation explicitly are a good fit for this subset. Runtime-generated
+R6 classes and documentation that depends on R6 introspection are not
+supported.
 
 **S3 generic discovery** combines installed package metadata with a static base
 catalog checked against R 4.5.3 and R 4.6.1. The catalog resolves base
@@ -301,13 +335,17 @@ General inline R evaluation is also unsupported. Inline `` `Rd ` `` expressions 
 executable R code blocks are not run.
 
 These roxygen2 tags are not implemented: `@concept`, `@describeIn`,
-`@docType`, `@example`, `@include`, `@inheritDotParams`, `@rawRd`, and
-`@slot`. Using one produces an `unknown-tag` warning and the run continues, so
+`@example`, `@inheritDotParams`, `@rawRd`, and `@slot`. Using one
+produces an `unknown-tag` warning and the run continues, so
 the omission is visible rather than silent. The tags listed under
 [Supported tags](#supported-tags) are the ones the model accepts.
 
 `@noMd` is diagnosed because Markdown is always enabled. `@md` is accepted only
 as a redundant declaration of that mode.
+
+`@include` accepts one or more case-sensitive `.R` or `.r` filenames from the
+package `R/` directory, validates that each direct source exists, and does not
+generate source ordering or DESCRIPTION `Collate` changes.
 
 Block quotes, thematic breaks, raw HTML, and other unsupported Markdown
 constructs are diagnosed with source locations and recovered where possible.

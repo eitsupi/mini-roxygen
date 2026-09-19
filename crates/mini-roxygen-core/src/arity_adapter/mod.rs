@@ -25,9 +25,9 @@ mod test_support;
 pub use authors::{AuthorsParseError, PersonSection, parse_authors};
 pub use facts::{
     AssignmentFact, AssignmentOperator, AssignmentTarget, AssignmentValue, BindingName,
-    CallArgument, CallArgumentValue, CallCallee, CallFact, Formal, FormalError, RName,
-    RNameDecodeError, S7ClassAnalysis, S7ClassFact, S7ClassRefusal, S7ClassRefusalReason,
-    TopLevelFact, TopLevelShape,
+    CallArgument, CallArgumentValue, CallCallee, CallFact, Formal, FormalError,
+    NamespaceObjectFact, RName, RNameDecodeError, S7ClassAnalysis, S7ClassFact, S7ClassRefusal,
+    S7ClassRefusalReason, TopLevelFact, TopLevelShape,
 };
 pub use ir::{BlockId, DocLine, ParsedFile, ParsedTopLevel, RawBody, RawTag, RoxyBlock};
 use lines::diagnostic_range;

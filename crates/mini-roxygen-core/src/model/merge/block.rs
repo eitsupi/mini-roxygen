@@ -12,7 +12,7 @@ use super::super::{
     Alias, DocumentedBlock, FormalNames, InheritanceRequest, MethodDeclaration, ParamDescription,
     RdTopic, RdTopicKind, ResolvedUsage, TopicKey, TopicKindOrigin, UsageContribution,
     data_object_span, first_order, implicit_object_name, origin_span, resolve_explicit_usage,
-    resolve_formal_names, resolve_usage, set_field, set_tag,
+    resolve_formal_names, resolve_usage, set_doc_type, set_field, set_tag,
 };
 use super::bindings::S7BindingResolution;
 
@@ -74,6 +74,18 @@ pub(super) fn merge_block(
     registrations: &[S3RegistrationFact],
 ) {
     topic.blocks.push(block.block);
+    if let BlockTarget::Reexport(value) = &block.target
+        && !topic.reexports.iter().any(|seen| {
+            seen.package == value.package.value.as_str() && seen.name == value.name.value.as_str()
+        })
+    {
+        topic.reexports.push(super::super::Reexport {
+            package: value.package.value.as_str().to_owned(),
+            name: value.name.value.as_str().to_owned(),
+            package_span: value.package.span,
+            name_span: value.name.span,
+        });
+    }
     let is_data = matches!(block.target, BlockTarget::DataObject(_));
     if is_data {
         let span = data_object_span(&block.target)
@@ -145,6 +157,24 @@ pub(super) fn merge_block(
                     block_slot_origins.insert("rdname", value.origin.clone());
                 }
             }
+            ParsedTag::DocType(value) => set_doc_type(
+                &mut topic.doc_type,
+                &mut topic.doc_type_suppressed,
+                Some(value.clone()),
+                None,
+                &mut block_slots,
+                &mut block_slot_origins,
+                diagnostics,
+            ),
+            ParsedTag::DocTypeSuppressed(origin) => set_doc_type(
+                &mut topic.doc_type,
+                &mut topic.doc_type_suppressed,
+                None,
+                Some(origin.clone()),
+                &mut block_slots,
+                &mut block_slot_origins,
+                diagnostics,
+            ),
             ParsedTag::Title(value) => set_field(
                 "title",
                 &mut topic.title,
@@ -355,7 +385,7 @@ pub(super) fn merge_block(
                 title: title.clone(),
                 origin: origin.clone(),
             }),
-            ParsedTag::Namespace(_) | ParsedTag::NoRd(_) => {}
+            ParsedTag::Include(_) | ParsedTag::Namespace(_) | ParsedTag::NoRd(_) => {}
             ParsedTag::SeeAlso(value) => set_field(
                 "seealso",
                 &mut topic.see_also,

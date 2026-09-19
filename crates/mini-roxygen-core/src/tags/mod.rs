@@ -16,11 +16,11 @@ mod text;
 mod words;
 
 pub use model::{
-    AliasDirective, ArgSelection, ArgSelector, DefaultAliasPolicy, DocName, ExamplesContent,
-    ExamplesIf, FieldTag, FieldValue, InheritField, InheritFields, InheritTarget, Keyword,
-    MarkdownText, NamespaceTag, ParamName, ParsedTag, PlainText, RCodeText, TagOrigin,
-    TagParseOptions, TagValue, TopicRef, UnknownTag, UnknownTagPolicy, UnsupportedTag,
-    UsageDirective,
+    AliasDirective, ArgSelection, ArgSelector, DefaultAliasPolicy, DocName, DocType,
+    ExamplesContent, ExamplesIf, FieldTag, FieldValue, IncludeDirective, InheritField,
+    InheritFields, InheritTarget, Keyword, MarkdownText, NamespaceTag, ParamName, ParsedTag,
+    PlainText, RCodeText, TagOrigin, TagParseOptions, TagValue, TopicRef, UnknownTag,
+    UnknownTagPolicy, UnsupportedTag, UsageDirective,
 };
 use registry::NamespaceTagKind;
 pub(crate) use section::split_section_title;
@@ -175,10 +175,35 @@ fn parse_tag(
             value: PlainText::new(value.clone()),
             origin,
         }),
+        KnownTagKind::DocType if value.as_str() == "NULL" => ParsedTag::DocTypeSuppressed(origin),
+        KnownTagKind::DocType => ParsedTag::DocType(TagValue {
+            value: parse_doc_type(raw_tag, &value, diagnostics)?,
+            origin,
+        }),
         KnownTagKind::Aliases => ParsedTag::Aliases(TagValue {
             value: parse_alias_directive(&value),
             origin,
         }),
+        KnownTagKind::Include => {
+            let files = parse_words(&value, str::to_owned);
+            if let Some(file) = files.iter().find(|file| invalid_include_path(&file.value)) {
+                emit_tag_diagnostic(
+                    diagnostics,
+                    raw_tag,
+                    DiagnosticCode::TagParseError,
+                    format!(
+                        "@include path is not a package-local R filename: {}",
+                        file.value
+                    ),
+                    file.span,
+                );
+                return None;
+            }
+            ParsedTag::Include(TagValue {
+                value: IncludeDirective { files },
+                origin,
+            })
+        }
         KnownTagKind::Keywords => ParsedTag::Keywords(parse_field(value, origin, |value| {
             parse_words(&value, |word| Keyword(word.to_owned()))
         })),
@@ -311,6 +336,45 @@ fn parse_alias_directive(value: &SourcedText) -> AliasDirective {
         DefaultAliasPolicy::Include
     };
     AliasDirective { explicit, defaults }
+}
+
+fn invalid_include_path(value: &str) -> bool {
+    use std::path::{Component, Path};
+
+    let path = Path::new(value);
+    value.contains('/')
+        || value.contains('\\')
+        || value.as_bytes().get(1) == Some(&b':')
+        || path.is_absolute()
+        || !path
+            .extension()
+            .is_some_and(|extension| extension == "R" || extension == "r")
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+}
+
+fn parse_doc_type(
+    raw_tag: &RawTag,
+    value: &SourcedText,
+    diagnostics: &mut Diagnostics,
+) -> Option<DocType> {
+    let words = crate::tags::words::word_ranges(value);
+    if words.len() != 1 {
+        emit_tag_diagnostic(
+            diagnostics,
+            raw_tag,
+            DiagnosticCode::TagParseError,
+            format!("@docType requires exactly one name, not {}", words.len()),
+            value_span(value, raw_tag.value_span),
+        );
+        return None;
+    }
+    let (start, end) = words[0];
+    Some(DocType::new(value.as_str()[start..end].to_owned()))
 }
 
 fn namespace_tag(kind: NamespaceTagKind, value: TagValue<PlainText>) -> NamespaceTag {

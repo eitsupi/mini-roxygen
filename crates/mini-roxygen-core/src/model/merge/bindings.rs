@@ -179,6 +179,43 @@ fn binding_precedes_alias(
     }
 }
 
+/// Returns whether a binding is provably a non-function through package-local
+/// facts. An unresolved alias is deliberately not classified here: explicit
+/// method metadata is authoritative when the target is outside the available
+/// binding facts or its evaluation order cannot be proven.
+pub(super) fn binding_is_proven_non_function(
+    binding: &BindingFact,
+    bindings: &[BindingFact],
+    sources: &SourceMap,
+    collate: bool,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    match &binding.value {
+        BindingValue::NonFunction => true,
+        BindingValue::Alias(target)
+            if visiting.insert(binding.name.canonical.as_str().to_owned()) =>
+        {
+            let candidates = bindings
+                .iter()
+                .filter(|candidate| candidate.name.canonical.as_str() == target.as_str())
+                .collect::<Vec<_>>();
+            let result = candidates.len() == 1
+                && binding_precedes_alias(candidates[0], binding, sources, collate)
+                && binding_is_proven_non_function(
+                    candidates[0],
+                    bindings,
+                    sources,
+                    collate,
+                    visiting,
+                );
+            visiting.remove(binding.name.canonical.as_str());
+            result
+        }
+        BindingValue::Alias(_) | BindingValue::Function { .. } | BindingValue::Unknown => false,
+        BindingValue::S7Class(_) | BindingValue::S7Refused(_) => false,
+    }
+}
+
 pub(super) fn validate_registration_targets(
     registrations: &[S3RegistrationFact],
     bindings: &[BindingFact],
