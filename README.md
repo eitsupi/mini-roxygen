@@ -170,13 +170,12 @@ function suffix. No runtime inspection is used to distinguish other callable
 and non-callable provider objects.
 
 The S4-related tags produce static NAMESPACE directives. They do not load R
-classes or inspect S4 method tables. Ordinary documentation can be attached to
-statically parseable R source, but runtime-generated R6 objects and methods are
-not discovered by loading a package. A minimal S7 subset recognizes literal
-`new_class()` definitions with a direct `constructor = function(...)` argument.
-These signatures are propagated through simple aliases. S7 generics, unions,
-multi-dispatch, method metadata, properties, and runtime introspection are not
-supported.
+classes or inspect S4 method tables.
+
+A minimal S7 subset recognizes literal `new_class()` definitions with a direct
+`constructor = function(...)` argument. These signatures are propagated
+through simple aliases. S7 generics, unions, multi-dispatch, method metadata,
+properties, and runtime introspection are not supported.
 
 Markdown is enabled for every documentation block. The supported conversion
 covers ordinary paragraphs, emphasis, strong text, links, inline code, lists,
