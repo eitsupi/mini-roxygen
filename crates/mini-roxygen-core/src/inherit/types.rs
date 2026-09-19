@@ -185,6 +185,8 @@ pub struct ResolvedRdTopic {
     pub blocks: Vec<crate::model::BlockRef>,
     /// Topic aliases.
     pub aliases: Vec<Alias>,
+    /// Statically recognized objects re-exported from other packages.
+    pub reexports: Vec<crate::model::Reexport>,
     /// Topic keywords.
     pub keywords: Vec<crate::tags::Keyword>,
     /// Resolved title.

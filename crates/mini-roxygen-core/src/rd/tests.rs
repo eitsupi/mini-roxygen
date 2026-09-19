@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -762,6 +763,177 @@ f <- function() f
     assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
     let generated = output.files.get(&TopicKey("f".to_owned())).unwrap();
     assert!(!generated.content.contains(r"\docType{"));
+}
+
+#[test]
+fn static_reexport_generates_typed_provider_links() {
+    let (model_output, sources) = model(
+        r#"#' @aliases select_helpers
+#' @export
+tidyselect::contains
+#' @export
+tidyselect::ends_with
+#' @export
+tidyselect::everything
+#' @export
+tidyselect::matches
+#' @export
+tidyselect::num_range
+#' @export
+tidyselect::one_of
+#' @export
+tidyselect::starts_with
+#' @export
+tidyselect::last_col
+#' @export
+tidyselect::all_of
+"#,
+    );
+    assert!(
+        model_output.diagnostics.is_empty(),
+        "{:?}",
+        model_output.diagnostics
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("reexports".to_owned()))
+        .expect("reexports Rd file");
+    crate::rd_oracle::assert_r_accepts(&generated.content);
+    assert!(generated.content.contains(r"\docType{import}"));
+    assert!(
+        generated
+            .content
+            .contains(r"\title{Objects exported from other packages}")
+    );
+    assert!(
+        generated
+            .content
+            .contains("These objects are imported from other packages.")
+    );
+    let names = [
+        "contains",
+        "ends_with",
+        "everything",
+        "matches",
+        "num_range",
+        "one_of",
+        "starts_with",
+        "last_col",
+        "all_of",
+    ];
+    let aliases = generated
+        .content
+        .lines()
+        .filter_map(|line| line.strip_prefix(r"\alias{")?.strip_suffix('}'))
+        .collect::<BTreeSet<_>>();
+    let expected_aliases = std::iter::once("reexports")
+        .chain(std::iter::once("select_helpers"))
+        .chain(names)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(aliases, expected_aliases);
+    for name in names {
+        assert!(
+            generated
+                .content
+                .contains(&format!(r"\link[tidyselect:{name}]{{{name}()}}"))
+        );
+    }
+    assert_eq!(generated.content.matches(r"\link[tidyselect:").count(), 9);
+    assert_eq!(generated.content.matches(r"\item{tidyselect}").count(), 1);
+    assert!(!generated.content.contains(r"\link[dplyr:"));
+}
+
+#[test]
+fn reexport_description_sorts_members_within_each_provider() {
+    let (model_output, sources) = model(
+        r#"#' @aliases helper helper
+#' @export
+dplyr::zeta
+#' @export
+tidyselect::alpha
+#' @export
+dplyr::alpha
+#' @export
+dplyr::alpha
+"#,
+    );
+    assert!(
+        model_output.diagnostics.is_empty(),
+        "{:?}",
+        model_output.diagnostics
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("reexports".to_owned()))
+        .expect("reexports Rd file");
+    let alpha = generated
+        .content
+        .find(r"\link[dplyr:alpha]")
+        .expect("dplyr alpha link");
+    let zeta = generated
+        .content
+        .find(r"\link[dplyr:zeta]")
+        .expect("dplyr zeta link");
+    assert!(alpha < zeta, "provider members should be sorted");
+    assert_eq!(generated.content.matches(r"\link[dplyr:alpha]").count(), 1);
+    crate::rd_oracle::assert_r_accepts(&generated.content);
+}
+
+#[test]
+fn infix_reexport_links_use_operator_labels_and_rd_escaping() {
+    let (model_output, sources) = model(
+        r#"#' @export
+pkg::`%op%`
+"#,
+    );
+    assert!(
+        model_output.diagnostics.is_empty(),
+        "{:?}",
+        model_output.diagnostics
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("reexports".to_owned()))
+        .expect("reexports Rd file");
+    assert!(generated.content.contains(r"\link[pkg:\%op\%]{\%op\%}"));
+    assert!(!generated.content.contains(r"%op%()}"));
+    crate::rd_oracle::assert_r_accepts(&generated.content);
+}
+
+#[test]
+fn reexport_null_suppressions_keep_provider_description_and_hide_doc_type() {
+    let (model_output, sources) = model(
+        r#"#' @docType NULL
+#' @description NULL
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(
+        model_output.diagnostics.is_empty(),
+        "{:?}",
+        model_output.diagnostics
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("reexports".to_owned()))
+        .expect("reexports Rd file");
+    assert!(!generated.content.contains(r"\docType{"));
+    assert!(
+        generated
+            .content
+            .contains("These objects are imported from other packages.")
+    );
+    assert!(generated.content.contains(r"\link[dplyr:filter]{filter()}"));
+    crate::rd_oracle::assert_r_accepts(&generated.content);
 }
 
 #[test]

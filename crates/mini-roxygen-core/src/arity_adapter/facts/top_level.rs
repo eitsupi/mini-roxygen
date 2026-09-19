@@ -34,6 +34,9 @@ pub enum TopLevelShape {
     /// A function call whose callee is statically recognizable, when it is a
     /// simple name or namespace-qualified name.
     Call(CallFact),
+    /// A direct, publicly qualified namespace object expression such as
+    /// `pkg::name`, retained separately from callable expressions.
+    NamespaceObject(NamespaceObjectFact),
     /// The bare `NULL` constant.
     Null,
     /// A string literal, with its decoded value (or the reason it was refused)
@@ -127,6 +130,8 @@ pub enum CallCallee {
         package: RName,
         name: RName,
         internal: bool,
+        package_span: Span,
+        name_span: Span,
     },
 }
 
@@ -144,6 +149,19 @@ pub struct CallFact {
     /// Typed analysis of an S7 `new_class` call, including source-aware
     /// refusals for recognized but unsupported shapes.
     pub s7_class: S7ClassAnalysis,
+}
+
+/// Facts for a direct namespace object expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamespaceObjectFact {
+    /// The complete `pkg::name` or `pkg:::name` source span.
+    pub span: Span,
+    /// The decoded package name and its source span.
+    pub package: Spanned<RName>,
+    /// The decoded member name and its source span.
+    pub name: Spanned<RName>,
+    /// Whether the expression uses the private `:::` operator.
+    pub internal: bool,
 }
 
 /// The result of classifying a call as an S7 constructor shape.
@@ -252,7 +270,29 @@ fn fact_for_expression(expression: Expr, file_id: FileId) -> TopLevelFact {
         Expr::Assignment(assignment) => assignment_fact(&assignment, file_id, span)
             .map(TopLevelShape::Assignment)
             .unwrap_or(TopLevelShape::Other),
-        Expr::Call(call) => TopLevelShape::Call(call_fact(call, file_id, span)),
+        Expr::Call(call) => {
+            let fact = call_fact(call, file_id, span);
+            namespace_object_fact(&fact)
+                .map_or(TopLevelShape::Call(fact), TopLevelShape::NamespaceObject)
+        }
+        Expr::Binary(binary) => binary
+            .namespace_access()
+            .and_then(|namespace| match namespace_callee(&namespace, file_id) {
+                Ok(CallCallee::Namespace {
+                    package,
+                    name,
+                    internal,
+                    package_span,
+                    name_span,
+                }) => Some(TopLevelShape::NamespaceObject(NamespaceObjectFact {
+                    span,
+                    package: Spanned::new(package, package_span),
+                    name: Spanned::new(name, name_span),
+                    internal,
+                })),
+                _ => None,
+            })
+            .unwrap_or(TopLevelShape::Other),
         Expr::Name(identifier) if identifier.constant() == Some(RConstant::Null) => {
             TopLevelShape::Null
         }
@@ -384,6 +424,29 @@ fn call_fact(call: CallExpr, file_id: FileId, span: Span) -> CallFact {
     }
 }
 
+fn namespace_object_fact(call: &CallFact) -> Option<NamespaceObjectFact> {
+    let callee = call.callee.as_ref()?;
+    if call.span.range != callee.span.range {
+        return None;
+    }
+    let Ok(CallCallee::Namespace {
+        package,
+        name,
+        internal,
+        package_span,
+        name_span,
+    }) = &callee.value
+    else {
+        return None;
+    };
+    Some(NamespaceObjectFact {
+        span: call.span,
+        package: Spanned::new(package.clone(), *package_span),
+        name: Spanned::new(name.clone(), *name_span),
+        internal: *internal,
+    })
+}
+
 fn call_argument(argument: Arg, file_id: FileId) -> CallArgument {
     let name = argument.name_token().map(|token| {
         let span = span_for_token(&token, file_id);
@@ -448,7 +511,12 @@ fn s7_class_analysis(
         Some(CallCallee::Simple(name)) if name.as_str() == "new_class"
     ) || matches!(
         callee.as_ref().and_then(|value| value.value.as_ref().ok()),
-        Some(CallCallee::Namespace { package, name, internal: false })
+        Some(CallCallee::Namespace {
+            package,
+            name,
+            internal: false,
+            ..
+        })
             if package.as_str() == "S7" && name.as_str() == "new_class"
     );
     if !is_new_class {
@@ -507,7 +575,7 @@ fn call_callee(
         && let Some(namespace) =
             BinaryExpr::cast(node.clone()).and_then(|binary| binary.namespace_access())
     {
-        let value = namespace_callee(&namespace);
+        let value = namespace_callee(&namespace, file_id);
         return Some(Spanned::new(value, span_for_node(&node, file_id)));
     }
 
@@ -520,6 +588,7 @@ fn call_callee(
 
 fn namespace_callee(
     namespace: &arity_parser::ast::NamespaceAccess,
+    file_id: FileId,
 ) -> Result<CallCallee, RNameDecodeError> {
     let package = RName::decode(
         namespace.package_token.text(),
@@ -533,6 +602,8 @@ fn namespace_callee(
         package,
         name,
         internal: namespace.internal,
+        package_span: span_for_token(&namespace.package_token, file_id),
+        name_span: span_for_token(&namespace.name_token, file_id),
     })
 }
 
@@ -810,6 +881,7 @@ foo()
             package,
             name,
             internal: false,
+            ..
         })) = call.callee.as_ref().map(|callee| &callee.value)
         else {
             panic!("expected a decoded namespace callee");
@@ -820,6 +892,33 @@ foo()
             source.text_range(call.callee.as_ref().unwrap().span.range),
             Some("pkg::second")
         );
+    }
+
+    #[test]
+    fn separates_direct_namespace_objects_from_namespace_calls() {
+        let (parsed_file, source) = parsed("pkg::member\n");
+        let TopLevelShape::NamespaceObject(object) = &parsed_file.top_level[0].fact.shape else {
+            panic!(
+                "expected a direct namespace object: {:?}",
+                parsed_file.top_level[0].fact.shape
+            );
+        };
+        assert_eq!(object.package.value.as_str(), "pkg");
+        assert_eq!(object.name.value.as_str(), "member");
+        assert_eq!(source.text_range(object.package.span.range), Some("pkg"));
+        assert_eq!(source.text_range(object.name.span.range), Some("member"));
+
+        let (parsed_file, _) = parsed("pkg::member()\n");
+        assert!(matches!(
+            parsed_file.top_level[0].fact.shape,
+            TopLevelShape::Call(_)
+        ));
+
+        let (parsed_file, _) = parsed("pkg:::member\n");
+        let TopLevelShape::NamespaceObject(object) = &parsed_file.top_level[0].fact.shape else {
+            panic!("expected a private namespace object");
+        };
+        assert!(object.internal);
     }
 
     #[test]
@@ -922,6 +1021,7 @@ foo()
             package,
             name,
             internal: false,
+            ..
         })) = call.callee.as_ref().map(|callee| &callee.value)
         else {
             panic!("expected decoded namespace callee");

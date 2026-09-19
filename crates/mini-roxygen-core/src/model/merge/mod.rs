@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::arity_adapter::RName;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label};
 use crate::package::PackageMetadata;
-use crate::r_parse::{AssociationRefusal, BindingFact, BlockTarget};
+use crate::r_parse::{AssociationRefusal, BindingFact, BlockTarget, ReexportObject};
 use crate::s3_register::S3RegistrationFact;
 use crate::source::{SourceMap, Span};
 use crate::tags::{ParsedTag, TagOrigin};
@@ -164,6 +164,26 @@ fn build_package_model_inner(
             continue;
         }
         let is_package = matches!(block_ref.target, BlockTarget::PackageDocumentation(_));
+        let reexport = match &block_ref.target {
+            BlockTarget::Reexport(value) if value.internal => {
+                emit_unsupported_reexport(&mut diagnostics, value);
+                continue;
+            }
+            BlockTarget::Reexport(value) => Some(value),
+            _ => None,
+        };
+        if reexport.is_some()
+            && (first_name(&block_ref.tags).is_some() || first_rdname(&block_ref.tags).is_some())
+        {
+            emit_reexport_metadata_diagnostic(&mut diagnostics, block_ref);
+            continue;
+        }
+        if reexport.is_some()
+            && let Some(span) = reexport_content_conflict_span(&block_ref.tags)
+        {
+            emit_reexport_content_diagnostic(&mut diagnostics, span);
+            continue;
+        }
         if let BlockTarget::Refused(
             refusal @ (AssociationRefusal::UndecodableDataName { .. }
             | AssociationRefusal::EmptyDataName { .. }),
@@ -172,7 +192,7 @@ fn build_package_model_inner(
             emit_data_name_diagnostic(&mut diagnostics, refusal);
             continue;
         }
-        if !is_package && !block::needs_doc(&block_ref.tags) {
+        if !is_package && reexport.is_none() && !block::needs_doc(&block_ref.tags) {
             continue;
         }
         if block::is_function_target(&block_ref.target)
@@ -279,20 +299,30 @@ fn build_package_model_inner(
             emit_missing_identity(&mut diagnostics, block_ref);
             continue;
         }
-        let primary = explicit_name
-            .map(|value| crate::tags::DocName(value.value.as_str().to_owned()))
-            .or_else(|| implicit_name.map(|name| crate::tags::DocName(name.as_str().to_owned())))
-            .or_else(|| {
-                data_object_name(&block_ref.target)
-                    .map(|name| crate::tags::DocName(name.as_str().to_owned()))
-            });
+        let primary = if reexport.is_some() {
+            Some(crate::tags::DocName("reexports".to_owned()))
+        } else {
+            explicit_name
+                .map(|value| crate::tags::DocName(value.value.as_str().to_owned()))
+                .or_else(|| {
+                    implicit_name.map(|name| crate::tags::DocName(name.as_str().to_owned()))
+                })
+                .or_else(|| {
+                    data_object_name(&block_ref.target)
+                        .map(|name| crate::tags::DocName(name.as_str().to_owned()))
+                })
+        };
         let Some(primary) = primary else {
             emit_missing_identity(&mut diagnostics, block_ref);
             continue;
         };
-        let key = first_rdname(&block_ref.tags)
-            .map(|value| TopicKey(value.value.as_str().to_owned()))
-            .unwrap_or_else(|| TopicKey(primary.0.clone()));
+        let key = if reexport.is_some() {
+            TopicKey("reexports".to_owned())
+        } else {
+            first_rdname(&block_ref.tags)
+                .map(|value| TopicKey(value.value.as_str().to_owned()))
+                .unwrap_or_else(|| TopicKey(primary.0.clone()))
+        };
         package::record_package_fallback_suppression(block_ref, &key, &mut package_fallback_states);
         let topic = package
             .topics
@@ -302,11 +332,17 @@ fn build_package_model_inner(
             topic.name = primary.clone();
         }
         if !suppresses_default_aliases(&block_ref.tags) {
-            let primary_span = explicit_name
-                .map(|value| origin_span(&value.origin))
-                .or_else(|| implicit_object_span(&block_ref.target))
-                .or_else(|| super::data_object_span(&block_ref.target))
-                .expect("a topic identity has either an explicit or implicit source span");
+            let primary_span = if reexport.is_some() {
+                reexport
+                    .map(|value| value.name.span)
+                    .expect("re-export target")
+            } else {
+                explicit_name
+                    .map(|value| origin_span(&value.origin))
+                    .or_else(|| implicit_object_span(&block_ref.target))
+                    .or_else(|| super::data_object_span(&block_ref.target))
+                    .expect("a topic identity has either an explicit or implicit source span")
+            };
             block::add_alias(
                 &key,
                 topic,
@@ -317,6 +353,18 @@ fn build_package_model_inner(
                 &mut alias_owners,
                 &mut diagnostics,
             );
+            if let Some(reexport) = reexport {
+                block::add_alias(
+                    &key,
+                    topic,
+                    Alias {
+                        name: crate::tags::DocName(reexport.name.value.as_str().to_owned()),
+                        span: reexport.name.span,
+                    },
+                    &mut alias_owners,
+                    &mut diagnostics,
+                );
+            }
             let implicit_alias_name = implicit_name
                 .map(RName::as_str)
                 .or_else(|| data_object_name(&block_ref.target).map(|name| name.as_str()));
@@ -361,6 +409,33 @@ fn build_package_model_inner(
             &mut diagnostics,
             &package_fallback_states,
         );
+    }
+
+    for topic in package.topics.values_mut() {
+        if topic.reexports.is_empty() {
+            continue;
+        }
+        let anchor = topic.reexports[0].name_span;
+        if topic.doc_type.is_none() && topic.doc_type_suppressed.is_none() {
+            topic.doc_type = Some(crate::tags::TagValue {
+                value: crate::tags::DocType::new("import".to_owned()),
+                origin: TagOrigin::Implicit { intro_span: anchor },
+            });
+        }
+        if topic.title.is_none() {
+            topic.title = Some(crate::tags::TagValue {
+                value: crate::tags::MarkdownText::new(crate::tags::SourcedText::synthetic(
+                    "Objects exported from other packages",
+                    anchor,
+                )),
+                origin: TagOrigin::Implicit { intro_span: anchor },
+            });
+        }
+        if !topic.keywords.iter().any(|keyword| keyword.0 == "internal") {
+            topic
+                .keywords
+                .push(crate::tags::Keyword("internal".to_owned()));
+        }
     }
 
     if let Some(metadata) = metadata {
@@ -433,6 +508,72 @@ fn build_package_model_inner(
         package,
         diagnostics,
     }
+}
+
+fn emit_unsupported_reexport(diagnostics: &mut Diagnostics, target: &ReexportObject) {
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::UnsupportedReexport.default_severity(),
+            DiagnosticCode::UnsupportedReexport,
+            "private namespace-qualified objects cannot be re-exported statically",
+            Label::new(target.span, "private namespace access uses `:::`"),
+        )
+        .with_help("use a public `pkg::name` expression for a static re-export"),
+    );
+}
+
+fn emit_reexport_metadata_diagnostic(diagnostics: &mut Diagnostics, block: &DocumentedBlock) {
+    let span = first_name(&block.tags)
+        .map(|value| origin_span(&value.origin))
+        .or_else(|| first_rdname(&block.tags).map(|value| origin_span(&value.origin)))
+        .unwrap_or(block.block_span);
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::UnsupportedReexport.default_severity(),
+            DiagnosticCode::UnsupportedReexport,
+            "static re-exports with @name or @rdname are outside the supported subset",
+            Label::new(
+                span,
+                "re-export topic metadata requires runtime object defaults",
+            ),
+        )
+        .with_help("omit @name and @rdname to use the shared reexports topic"),
+    );
+}
+
+fn reexport_content_conflict_span(tags: &[ParsedTag]) -> Option<Span> {
+    tags.iter().find_map(|tag| match tag {
+        ParsedTag::Description(value) | ParsedTag::Details(value)
+            if matches!(value.value, crate::tags::FieldValue::Emit(_)) =>
+        {
+            Some(origin_span(&value.origin))
+        }
+        // An untagged intro can become an implicit title when it has only one
+        // paragraph. It is still prose supplied by the user, rather than the
+        // generated provider link list, so reject it for this subset too.
+        ParsedTag::Title(value)
+            if matches!(value.origin, TagOrigin::Implicit { .. })
+                && matches!(value.value, crate::tags::FieldValue::Emit(_)) =>
+        {
+            Some(origin_span(&value.origin))
+        }
+        _ => None,
+    })
+}
+
+fn emit_reexport_content_diagnostic(diagnostics: &mut Diagnostics, span: Span) {
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::UnsupportedReexport.default_severity(),
+            DiagnosticCode::UnsupportedReexport,
+            "static re-exports cannot combine generated provider links with prose content",
+            Label::new(
+                span,
+                "re-export prose would replace the generated description",
+            ),
+        )
+        .with_help("remove the intro, @description, and @details prose from the re-export block"),
+    );
 }
 
 fn validate_includes(sources: &SourceMap, block: &DocumentedBlock, diagnostics: &mut Diagnostics) {

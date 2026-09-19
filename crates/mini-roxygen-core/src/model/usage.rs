@@ -148,7 +148,7 @@ fn is_known_non_function_constructor(call: &crate::arity_adapter::CallFact) -> b
         Some(CallCallee::Namespace {
             package,
             name,
-            internal: _,
+            ..
         }) if package.as_str() == "base" && name.as_str() == "new.env"
     )
 }

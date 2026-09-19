@@ -48,6 +48,7 @@ fn resolved_topic(topic: &RdTopic, view: InheritableTopic) -> ResolvedRdTopic {
         kind_conflict_reported: topic.kind_conflict_reported,
         blocks: topic.blocks.clone(),
         aliases: topic.aliases.clone(),
+        reexports: topic.reexports.clone(),
         keywords: topic.keywords.clone(),
         title: view.fields.title,
         description: view.fields.description,

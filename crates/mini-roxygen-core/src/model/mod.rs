@@ -20,7 +20,7 @@ pub(crate) use ir::{
     Alias, BlockRef, DocumentedBlock, FormalContribution, FormalName, FormalNames,
     InheritanceRequest, MethodDeclaration, ModelOutput, NamedSection, NamespaceRequest,
     PackageAuthor, PackageComment, PackageIdentity, PackageLink, PackageMetadataDiagnosticState,
-    PackageModel, PackagePerson, PackageSeeAlso, ParamDescription, RdTopic, RdTopicKind,
+    PackageModel, PackagePerson, PackageSeeAlso, ParamDescription, RdTopic, RdTopicKind, Reexport,
     ResolvedUsage, UsageContribution,
 };
 pub(crate) use merge::build_package_model_with_metadata_bindings_and_registrations;

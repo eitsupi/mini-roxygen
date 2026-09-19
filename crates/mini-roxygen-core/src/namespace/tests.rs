@@ -710,6 +710,146 @@ NULL
 }
 
 #[test]
+fn static_reexport_emits_one_import_and_implicit_export() {
+    let output = namespace(
+        r#"#' @export
+dplyr::filter
+"#,
+    );
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    assert_eq!(
+        output.content.matches("importFrom(dplyr,filter)").count(),
+        1
+    );
+    assert_eq!(output.content.matches("export(filter)").count(), 1);
+}
+
+#[test]
+fn reexport_without_namespace_tags_still_emits_its_import() {
+    let output = namespace(
+        r#"#' @aliases helper
+dplyr::filter
+"#,
+    );
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    assert_eq!(
+        output.content.matches("importFrom(dplyr,filter)").count(),
+        1
+    );
+    assert!(!output.content.contains("export(filter)"));
+}
+
+#[test]
+fn tagless_reexport_respects_current_package_filter() {
+    let output = namespace_with_package(
+        r#"#' @aliases helper
+current::filter
+"#,
+        Some("current"),
+    );
+    assert!(!output.content.contains("importFrom(current,"));
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::SelfImport)
+    );
+}
+
+#[test]
+fn tidyselect_reexports_have_exact_import_and_export_sets() {
+    let output = namespace(
+        r#"#' @aliases select_helpers
+#' @export
+tidyselect::contains
+#' @export
+tidyselect::ends_with
+#' @export
+tidyselect::everything
+#' @export
+tidyselect::matches
+#' @export
+tidyselect::num_range
+#' @export
+tidyselect::one_of
+#' @export
+tidyselect::starts_with
+#' @export
+tidyselect::last_col
+#' @export
+tidyselect::all_of
+"#,
+    );
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let names = [
+        "contains",
+        "ends_with",
+        "everything",
+        "matches",
+        "num_range",
+        "one_of",
+        "starts_with",
+        "last_col",
+        "all_of",
+    ];
+    assert_eq!(output.content.matches("importFrom(tidyselect,").count(), 1);
+    assert!(output.content.contains(
+        "importFrom(tidyselect,\n  all_of,\n  contains,\n  ends_with,\n  everything,\n  last_col,\n  matches,\n  num_range,\n  one_of,\n  starts_with\n)"
+    ));
+    let exports = output
+        .content
+        .lines()
+        .filter(|line| line.starts_with("export("))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let expected_exports = names
+        .iter()
+        .map(|name| format!("export({name})"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(exports, expected_exports);
+}
+
+#[test]
+fn explicit_reexport_import_is_deduplicated_with_generated_import() {
+    let output = namespace(
+        r#"#' @importFrom dplyr filter
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    assert_eq!(
+        output.content.matches("importFrom(dplyr,filter)").count(),
+        1
+    );
+}
+
+#[test]
+fn repeated_reexports_and_multiple_providers_are_deduplicated_and_sorted() {
+    let output = namespace(
+        r#"#' @aliases helper
+#' @export
+dplyr::filter
+#' @export
+dplyr::filter
+#' @export
+base::identity
+"#,
+    );
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    assert_eq!(
+        output.content.matches("importFrom(dplyr,filter)").count(),
+        1
+    );
+    assert_eq!(
+        output.content.matches("importFrom(base,identity)").count(),
+        1
+    );
+    assert_eq!(output.content.matches("export(filter)").count(), 1);
+    assert_eq!(output.content.matches("export(identity)").count(), 1);
+}
+
+#[test]
 fn import_from_with_three_names_uses_roxygen2_multiline_form() {
     let output = namespace(
         r#"#' @importFrom pkg first second third

@@ -171,6 +171,7 @@ fn matches_signature(call: &CallFact, signature: &S3RegistrarSignature) -> bool 
             package,
             name,
             internal,
+            ..
         } if !internal => signature.callee() == format!("{}::{}", package.as_str(), name.as_str()),
         CallCallee::Namespace { .. } => false,
     }

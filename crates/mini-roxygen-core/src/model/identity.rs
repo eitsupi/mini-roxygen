@@ -18,6 +18,7 @@ pub(in crate::model) fn implicit_object_name(target: &BlockTarget) -> Option<&RN
         | BlockTarget::ValueAssignment(crate::r_parse::ValueObject { name, .. }) => {
             Some(&name.canonical)
         }
+        BlockTarget::Reexport(value) => (!value.internal).then_some(&value.name.value),
         BlockTarget::Null { .. }
         | BlockTarget::DataObject(_)
         | BlockTarget::PackageDocumentation(_)
@@ -41,6 +42,7 @@ pub(in crate::model) fn implicit_object_span(target: &BlockTarget) -> Option<Spa
         | BlockTarget::ValueAssignment(crate::r_parse::ValueObject { name, .. }) => {
             Some(name.spelling)
         }
+        BlockTarget::Reexport(value) => (!value.internal).then_some(value.name.span),
         BlockTarget::Null { .. }
         | BlockTarget::DataObject(_)
         | BlockTarget::PackageDocumentation(_)

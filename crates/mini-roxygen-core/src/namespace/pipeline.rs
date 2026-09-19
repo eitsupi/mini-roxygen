@@ -86,6 +86,34 @@ fn build_namespace_inner(
     let mut analyzer = S3Analyzer::new(package, sources, provider);
     let mut warned_s3_objects = BTreeSet::new();
 
+    // Re-export imports are topic defaults, not namespace-tag defaults. This
+    // keeps a documented `pkg::name` expression correct even when its block
+    // has only prose or alias metadata, and it collects each accepted member
+    // exactly once before the ordinary directive deduplication pass.
+    for topic in package.topics.values() {
+        for reexport in &topic.reexports {
+            let Some(provider_package) = NamespacePackageName::new(reexport.package.clone()) else {
+                continue;
+            };
+            let Some(member) = NamespaceObjectName::new(reexport.name.clone()) else {
+                continue;
+            };
+            if current_package == Some(provider_package.as_str()) {
+                warn_reexport_self_import(
+                    &mut diagnostics,
+                    provider_package.as_str(),
+                    reexport.package_span,
+                );
+                continue;
+            }
+            normalized.push(NamespaceDirective::ImportFrom {
+                package: provider_package,
+                names: NonEmptyNamespaceNames::new(vec![member])
+                    .expect("validated re-export member"),
+            });
+        }
+    }
+
     // Collect and validate each request in model order. Final output ordering
     // is independent of this order, but diagnostics retain source traversal.
     for request in &package.namespace {
@@ -776,6 +804,19 @@ fn warn_self_import(
             ),
         )
         .with_context("tag", tag_name.to_owned())
+        .with_context("package", package.to_owned()),
+    );
+}
+
+fn warn_reexport_self_import(diagnostics: &mut Diagnostics, package: &str, package_span: Span) {
+    let code = DiagnosticCode::SelfImport;
+    diagnostics.push(
+        Diagnostic::new(
+            code.default_severity(),
+            code,
+            format!("static re-export imports from the current package `{package}`"),
+            Label::new(package_span, "this is the package being documented"),
+        )
         .with_context("package", package.to_owned()),
     );
 }

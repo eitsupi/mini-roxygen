@@ -161,6 +161,8 @@ define_diagnostic_codes! {
     UnmanagedOutputOverwrite, "unmanaged-output-overwrite", Error,
     /// A NAMESPACE directive is invalid.
     InvalidNamespaceDirective, "invalid-namespace-directive", Error,
+    /// A namespace-qualified re-export uses syntax outside the static subset.
+    UnsupportedReexport, "unsupported-reexport", Error,
     /// A namespace directive imports from the package being documented, which
     /// asks R for nothing and is more often a misspelled neighbour.
     SelfImport, "self-import", Warning,

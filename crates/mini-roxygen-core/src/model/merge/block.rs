@@ -74,6 +74,18 @@ pub(super) fn merge_block(
     registrations: &[S3RegistrationFact],
 ) {
     topic.blocks.push(block.block);
+    if let BlockTarget::Reexport(value) = &block.target
+        && !topic.reexports.iter().any(|seen| {
+            seen.package == value.package.value.as_str() && seen.name == value.name.value.as_str()
+        })
+    {
+        topic.reexports.push(super::super::Reexport {
+            package: value.package.value.as_str().to_owned(),
+            name: value.name.value.as_str().to_owned(),
+            package_span: value.package.span,
+            name_span: value.name.span,
+        });
+    }
     let is_data = matches!(block.target, BlockTarget::DataObject(_));
     if is_data {
         let span = data_object_span(&block.target)

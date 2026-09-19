@@ -155,6 +155,18 @@ The NAMESPACE subset includes:
 - `@exportPattern`, `@exportClass`, `@exportMethod`, `@importClassesFrom`, and
   `@importMethodsFrom`.
 
+A documented top-level `pkg::name` expression is a static re-export. It is
+merged into the shared `reexports` topic, emits the provider link list, and
+adds the corresponding `importFrom(pkg, name)` and (for bare `@export`) the
+member export. Private `pkg:::name` access, computed expressions, calls, and
+re-exports with `@name` or `@rdname` are refused rather than guessed. The
+generated provider description cannot be combined with an intro,
+`@description`, or `@details` prose in the same block.
+Provider links use the static label convention `name()` for ordinary names;
+infix names such as `` `%op%` `` keep their operator spelling without a
+function suffix. No runtime inspection is used to distinguish other callable
+and non-callable provider objects.
+
 The S4-related tags produce static NAMESPACE directives. They do not load R
 classes or inspect S4 method tables. Ordinary documentation can be attached to
 statically parseable R source, but runtime-generated R6 objects and methods are

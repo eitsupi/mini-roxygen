@@ -1074,6 +1074,141 @@ TableType <- R6Class("IgnoredTable")
 }
 
 #[test]
+fn static_namespace_reexport_builds_the_shared_topic_and_implicit_export() {
+    let output = model(
+        r#"#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("shared reexports topic");
+    assert_eq!(topic.name.0, "reexports");
+    assert_eq!(
+        topic.doc_type.as_ref().expect("docType").value.as_str(),
+        "import"
+    );
+    assert_eq!(
+        topic
+            .aliases
+            .iter()
+            .map(|alias| alias.name.0.as_str())
+            .collect::<Vec<_>>(),
+        ["reexports", "filter"]
+    );
+    assert_eq!(topic.reexports.len(), 1);
+    assert_eq!(topic.reexports[0].package, "dplyr");
+    assert_eq!(topic.reexports[0].name, "filter");
+    assert!(topic.keywords.iter().any(|keyword| keyword.0 == "internal"));
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
+fn reexport_prose_is_rejected_instead_of_replacing_generated_links() {
+    let output = model(
+        r#"#' @description custom provider prose
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert!(output.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == DiagnosticCode::UnsupportedReexport
+            && diagnostic
+                .message
+                .contains("cannot combine generated provider links")
+    }));
+}
+
+#[test]
+fn reexport_intro_prose_is_rejected() {
+    let output = model(
+        r#"#' Provider prose.
+#' @export
+dplyr::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == DiagnosticCode::UnsupportedReexport })
+    );
+}
+
+#[test]
+fn private_reexport_is_refused_with_source_diagnostic() {
+    let output = model(
+        r#"#' @export
+dplyr:::filter
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    let diagnostic = output
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnsupportedReexport)
+        .expect("private re-export diagnostic");
+    assert!(
+        diagnostic
+            .primary
+            .message
+            .contains("private namespace access")
+    );
+}
+
+#[test]
+fn reexport_topic_metadata_is_refused() {
+    for tag in ["@name custom", "@rdname custom"] {
+        let source = format!("#' {tag}\n#' @export\ndplyr::filter\n");
+        let output = model(&source);
+        assert!(output.package.topics.is_empty(), "{tag}");
+        assert!(output.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == DiagnosticCode::UnsupportedReexport
+                && diagnostic.message.contains("@name or @rdname")
+        }));
+    }
+}
+
+#[test]
+fn namespace_call_is_not_mistaken_for_a_reexport() {
+    let output = model(
+        r#"#' @export
+dplyr::filter()
+"#,
+    );
+    assert!(output.package.topics.is_empty());
+    let namespace = crate::namespace::build_namespace(&output.package, None);
+    assert!(
+        namespace
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::InvalidNamespaceDirective)
+    );
+}
+
+#[test]
+fn reexport_doc_type_suppression_is_not_replaced_by_an_inferred_default() {
+    let output = model(
+        r#"#' @docType NULL
+#' @export
+dplyr::filter
+"#,
+    );
+    let topic = output
+        .package
+        .topics
+        .get(&TopicKey("reexports".into()))
+        .expect("reexports topic");
+    assert!(topic.doc_type.is_none());
+    assert!(topic.doc_type_suppressed.is_some());
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
 fn export_only_r6_generators_keep_namespace_without_topics() {
     let output = model(
         r#"#' @importFrom R6 R6Class

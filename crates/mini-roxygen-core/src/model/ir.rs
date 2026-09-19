@@ -116,6 +116,8 @@ pub struct RdTopic {
     pub blocks: Vec<BlockRef>,
     /// Aliases in first-seen order, retaining the source span of each claim.
     pub aliases: Vec<Alias>,
+    /// Statically recognized objects re-exported from other packages.
+    pub reexports: Vec<Reexport>,
     /// Keywords in first-seen order.
     pub keywords: Vec<Keyword>,
     /// The one title slot, when supplied.
@@ -252,6 +254,7 @@ impl RdTopic {
             kind_conflict_reported: false,
             blocks: Vec::new(),
             aliases: Vec::new(),
+            reexports: Vec::new(),
             keywords: Vec::new(),
             title: None,
             description: None,
@@ -318,6 +321,19 @@ impl RdTopic {
             FormalNames::NotFunction
         }
     }
+}
+
+/// One source-backed namespace-qualified object in a re-export topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reexport {
+    /// The provider package name.
+    pub package: String,
+    /// The exported member name.
+    pub name: String,
+    /// The source span of the provider package.
+    pub package_span: Span,
+    /// The source span of the member name.
+    pub name_span: Span,
 }
 
 /// One formal name of a documented function, with the span that introduced it.
