@@ -296,6 +296,19 @@ format description that roxygen2 obtains by evaluating an object is not
 generated. Without an explicit format, inherited format, or `@format NULL`,
 mini-roxygen emits a `missing-data-format` warning.
 
+**R6 classes** are supported when their documentation is written explicitly
+and the class can be handled as a static value assignment. For example, a
+top-level assignment such as `Widget <- R6Class(...)` can use ordinary tags
+including `@title`, `@description`, `@docType class`, `@usage NULL`,
+`@format NULL`, `@section`, `@rdname`, `@aliases`, and `@export`. mini-roxygen
+does not specially parse or evaluate `R6Class()` or inspect its arguments and
+body. It does not automatically generate documentation for public or private
+methods, fields, active bindings, inheritance, or member sections. Packages
+that disable roxygen2's automatic R6 documentation and maintain their class
+documentation explicitly are a good fit for this subset. Runtime-generated
+R6 classes and documentation that depends on R6 introspection are not
+supported.
+
 **S3 generic discovery** combines installed package metadata with a static base
 catalog checked against R 4.5.3 and R 4.6.1. The catalog resolves base
 primitive, group, and ordinary generics even when a standard installation has
@@ -333,10 +346,7 @@ as a redundant declaration of that mode.
 
 `@include` accepts one or more case-sensitive `.R` or `.r` filenames from the
 package `R/` directory, validates that each direct source exists, and does not
-generate source ordering or DESCRIPTION `Collate` changes. Direct assignments
-are handled by the general static value-assignment model: constructors and
-bodies are not evaluated, and inline R6 methods, fields, inheritance, and
-member sections are not generated automatically.
+generate source ordering or DESCRIPTION `Collate` changes.
 
 Block quotes, thematic breaks, raw HTML, and other unsupported Markdown
 constructs are diagnosed with source locations and recovered where possible.
