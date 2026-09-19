@@ -162,6 +162,8 @@ member export. Private `pkg:::name` access, computed expressions, calls, and
 re-exports with `@name` or `@rdname` are refused rather than guessed. The
 generated provider description cannot be combined with an intro,
 `@description`, or `@details` prose in the same block.
+When a static re-export exists, `reexports` is reserved for its shared topic;
+an ordinary topic using that name is rejected with a source-aware diagnostic.
 Provider links use the static label convention `name()` for ordinary names;
 infix names such as `` `%op%` `` keep their operator spelling without a
 function suffix. No runtime inspection is used to distinguish other callable

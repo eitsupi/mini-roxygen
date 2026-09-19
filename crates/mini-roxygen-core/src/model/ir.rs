@@ -507,6 +507,11 @@ pub struct NamespaceRequest {
     /// as a function. Simple name aliases qualify even when their target is
     /// outside the statically available binding facts.
     pub object_accepts_explicit_method: bool,
+    /// Whether the implicit object is a public static namespace re-export.
+    ///
+    /// Re-export members are already known to be ordinary exported objects;
+    /// they must not be sent through package-local S3 classification.
+    pub object_is_reexport: bool,
     /// The complete spelling span of the implicit binding name.
     pub object_spelling: Option<Span>,
     /// The block's first `@method` declaration, if present.

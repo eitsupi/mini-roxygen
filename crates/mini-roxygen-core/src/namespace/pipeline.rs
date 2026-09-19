@@ -259,6 +259,10 @@ fn collect_request(
                     directives.push(NamespaceDirective::S3Method { generic, class });
                     return;
                 }
+                if request.object_is_reexport {
+                    directives.push(NamespaceDirective::Export { name });
+                    return;
+                }
                 match analyzer.analyze(object) {
                     S3ExportAnalysis::OrdinaryExport => {
                         directives.push(NamespaceDirective::Export { name });

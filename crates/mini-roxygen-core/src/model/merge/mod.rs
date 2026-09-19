@@ -3,7 +3,7 @@
 //! The facade owns traversal order and delegates cohesive binding, package,
 //! and block responsibilities to the sibling modules in this directory.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::arity_adapter::RName;
@@ -122,6 +122,10 @@ fn build_package_model_inner(
     let mut alias_owners: BTreeMap<String, (TopicKey, Span)> = BTreeMap::new();
     let mut method_claims: BTreeMap<(TopicKey, String, String), TagOrigin> = BTreeMap::new();
     let mut package_fallback_states = package::PackageFallbackStates::default();
+    let static_reexport_span = blocks.iter().find_map(|block| match &block.target {
+        BlockTarget::Reexport(value) if !value.internal => Some(value.span),
+        _ => None,
+    });
     for block_ref in blocks.iter() {
         let implicit_object = implicit_object_name(&block_ref.target);
         validate_includes(sources, block_ref, &mut diagnostics);
@@ -143,9 +147,26 @@ fn build_package_model_inner(
         let object_accepts_explicit_method = match &block_ref.target {
             BlockTarget::FunctionAssignment(_) => true,
             BlockTarget::ValueAssignment(crate::r_parse::ValueObject {
+                name: _,
+                assignment_span,
                 value: NonFunctionValue::Name(name),
                 ..
-            }) => name.value.is_ok(),
+            }) => {
+                name.value.is_ok()
+                    && !package
+                        .bindings
+                        .iter()
+                        .find(|binding| binding.assignment_span == *assignment_span)
+                        .is_some_and(|binding| {
+                            bindings::binding_is_proven_non_function(
+                                binding,
+                                &package.bindings,
+                                sources,
+                                collate,
+                                &mut BTreeSet::new(),
+                            )
+                        })
+            }
             _ => false,
         };
         let matching_registrations = implicit_object
@@ -165,6 +186,10 @@ fn build_package_model_inner(
                         BlockTarget::FunctionAssignment(_)
                     ),
                     object_accepts_explicit_method,
+                    object_is_reexport: matches!(
+                        &block_ref.target,
+                        BlockTarget::Reexport(value) if !value.internal
+                    ),
                     object_spelling: implicit_object_span(&block_ref.target),
                     method: explicit_method.clone(),
                 });
@@ -334,6 +359,13 @@ fn build_package_model_inner(
                 .map(|value| TopicKey(value.value.as_str().to_owned()))
                 .unwrap_or_else(|| TopicKey(primary.0.clone()))
         };
+        if reexport.is_none()
+            && key.0 == "reexports"
+            && let Some(static_reexport_span) = static_reexport_span
+        {
+            emit_reexport_topic_collision(&mut diagnostics, block_ref, static_reexport_span);
+            continue;
+        }
         package::record_package_fallback_suppression(block_ref, &key, &mut package_fallback_states);
         let topic = package
             .topics
@@ -584,6 +616,29 @@ fn emit_reexport_content_diagnostic(diagnostics: &mut Diagnostics, span: Span) {
             ),
         )
         .with_help("remove the intro, @description, and @details prose from the re-export block"),
+    );
+}
+
+fn emit_reexport_topic_collision(
+    diagnostics: &mut Diagnostics,
+    block: &DocumentedBlock,
+    static_reexport_span: Span,
+) {
+    diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::UnsupportedReexport.default_severity(),
+            DiagnosticCode::UnsupportedReexport,
+            "ordinary topic name `reexports` is reserved for static re-exports",
+            Label::new(
+                block.block_span,
+                "ordinary topic collides with the shared re-export topic",
+            ),
+        )
+        .with_secondary(Label::new(
+            static_reexport_span,
+            "static re-export topic uses this reserved name",
+        ))
+        .with_help("choose a different @name or @rdname for the ordinary topic"),
     );
 }
 
