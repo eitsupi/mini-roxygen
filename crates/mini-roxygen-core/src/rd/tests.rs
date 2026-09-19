@@ -732,6 +732,39 @@ fn explicit_doc_type_overrides_an_inferred_data_type() {
 }
 
 #[test]
+fn doc_type_null_suppresses_inferred_output_but_keeps_data_metadata() {
+    let (model_output, sources) = model(
+        r#"#' Dataset title
+#' @docType NULL
+"dataset"
+"#,
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("dataset".to_owned()))
+        .expect("generated data topic");
+    assert!(!generated.content.contains(r"\docType{"));
+    assert!(generated.content.contains(r"data(dataset)"));
+    assert!(generated.content.contains(r"\keyword{datasets}"));
+}
+
+#[test]
+fn doc_type_null_suppresses_ordinary_output() {
+    let (model_output, sources) = model(
+        r#"#' Function title
+#' @docType NULL
+f <- function() f
+"#,
+    );
+    let output = build_rd(&resolved(&model_output.package), &sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output.files.get(&TopicKey("f".to_owned())).unwrap();
+    assert!(!generated.content.contains(r"\docType{"));
+}
+
+#[test]
 fn data_topics_without_format_warn_at_the_missing_format_anchor() {
     let source = r#"#' Dataset title
 "dataset"
@@ -3058,6 +3091,42 @@ fn package_metadata_warnings_are_emitted_before_missing_package_title() {
                 | crate::diagnostic::DiagnosticCode::MissingPackageTitle
         ) || diagnostic.primary.span == sentinel_span
     }));
+}
+
+#[test]
+fn package_doc_type_null_suppresses_inferred_output_and_keeps_metadata_output() {
+    let root = tempfile::tempdir().expect("temporary package root");
+    fs::create_dir(root.path().join("R")).expect("R directory should be creatable");
+    fs::write(
+        root.path().join("DESCRIPTION"),
+        "Package: example\nTitle: Metadata title\nVersion: 0.1.0\nDescription: Metadata description.\n",
+    )
+    .expect("DESCRIPTION should be writable");
+    let source = r#"#' @docType NULL
+"_PACKAGE"
+"#;
+    let source_path = root.path().join("R/package.R");
+    fs::write(&source_path, source).expect("R source should be writable");
+    let mut inputs = PackageInputs::from_package_root(root.path()).expect("inputs should load");
+    let blocks = crate::model::test_support::blocks(&mut inputs.sources, "test.R", source);
+    let model = build_package_model_with_metadata(&inputs.sources, blocks, &inputs.metadata);
+    assert!(model.diagnostics.is_empty(), "{:?}", model.diagnostics);
+
+    let output = build_rd(&resolved(&model.package), &inputs.sources);
+    assert!(!output.diagnostics.has_errors(), "{:?}", output.diagnostics);
+    let generated = output
+        .files
+        .get(&TopicKey("example-package".to_owned()))
+        .expect("package Rd file");
+    assert!(!generated.content.contains(r"\docType{package}"));
+    assert!(!generated.content.contains(r"\docType{NULL}"));
+    assert!(
+        generated.content.contains(r"\name{example-package}"),
+        "{content}",
+        content = generated.content
+    );
+    assert!(generated.content.contains("Metadata title"));
+    assert!(generated.content.contains("Metadata description."));
 }
 
 #[test]

@@ -105,6 +105,8 @@ pub struct RdTopic {
     pub kind: RdTopicKind,
     /// The explicit documentation type, when supplied by `@docType`.
     pub doc_type: Option<TagValue<DocType>>,
+    /// The origin of an explicit `@docType NULL` suppression, when present.
+    pub doc_type_suppressed: Option<TagOrigin>,
     /// The first package/data contribution that established a non-ordinary
     /// kind. This remains available even when aliases are suppressed.
     pub(crate) kind_origin: Option<TopicKindOrigin>,
@@ -245,6 +247,7 @@ impl RdTopic {
             name,
             kind: RdTopicKind::Ordinary,
             doc_type: None,
+            doc_type_suppressed: None,
             kind_origin: None,
             kind_conflict_reported: false,
             blocks: Vec::new(),

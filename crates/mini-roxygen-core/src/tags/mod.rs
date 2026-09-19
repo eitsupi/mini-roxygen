@@ -175,6 +175,7 @@ fn parse_tag(
             value: PlainText::new(value.clone()),
             origin,
         }),
+        KnownTagKind::DocType if value.as_str() == "NULL" => ParsedTag::DocTypeSuppressed(origin),
         KnownTagKind::DocType => ParsedTag::DocType(TagValue {
             value: parse_doc_type(raw_tag, &value, diagnostics)?,
             origin,

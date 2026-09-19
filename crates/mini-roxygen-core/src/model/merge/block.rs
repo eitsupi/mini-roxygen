@@ -12,7 +12,7 @@ use super::super::{
     Alias, DocumentedBlock, FormalNames, InheritanceRequest, MethodDeclaration, ParamDescription,
     RdTopic, RdTopicKind, ResolvedUsage, TopicKey, TopicKindOrigin, UsageContribution,
     data_object_span, first_order, implicit_object_name, origin_span, resolve_explicit_usage,
-    resolve_formal_names, resolve_usage, set_field, set_tag, set_tag_deduplicate_equal,
+    resolve_formal_names, resolve_usage, set_doc_type, set_field, set_tag,
 };
 use super::bindings::S7BindingResolution;
 
@@ -145,10 +145,20 @@ pub(super) fn merge_block(
                     block_slot_origins.insert("rdname", value.origin.clone());
                 }
             }
-            ParsedTag::DocType(value) => set_tag_deduplicate_equal(
-                "docType",
+            ParsedTag::DocType(value) => set_doc_type(
                 &mut topic.doc_type,
-                value.clone(),
+                &mut topic.doc_type_suppressed,
+                Some(value.clone()),
+                None,
+                &mut block_slots,
+                &mut block_slot_origins,
+                diagnostics,
+            ),
+            ParsedTag::DocTypeSuppressed(origin) => set_doc_type(
+                &mut topic.doc_type,
+                &mut topic.doc_type_suppressed,
+                None,
+                Some(origin.clone()),
                 &mut block_slots,
                 &mut block_slot_origins,
                 diagnostics,

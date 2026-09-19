@@ -439,6 +439,8 @@ pub enum ParsedTag {
     RdName(TagValue<PlainText>),
     /// A single validated documentation type name.
     DocType(TagValue<DocType>),
+    /// Suppresses inferred documentation type output.
+    DocTypeSuppressed(TagOrigin),
     /// Documentation aliases split into source-backed words.
     Aliases(TagValue<AliasDirective>),
     /// Package-local R source files to include in the source-order contract.
@@ -738,6 +740,13 @@ mod tests {
                 DiagnosticCode::TagParseError
             );
         }
+    }
+
+    #[test]
+    fn doc_type_null_is_a_typed_suppression() {
+        let (tags, diagnostics, _) = parsed("#' @docType NULL\n", UnknownTagPolicy::Warn);
+        assert!(diagnostics.is_empty());
+        assert!(matches!(tags.as_slice(), [ParsedTag::DocTypeSuppressed(_)]));
     }
 
     #[test]

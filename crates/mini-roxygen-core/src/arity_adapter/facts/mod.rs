@@ -20,7 +20,7 @@ pub(super) use name::decode_authors_string_literal;
 pub use name::{RName, RNameDecodeError};
 pub use top_level::{
     AssignmentFact, AssignmentOperator, AssignmentTarget, AssignmentValue, BindingName,
-    CallArgument, CallArgumentValue, CallCallee, CallFact, R6ClassAnalysis, S7ClassAnalysis,
-    S7ClassFact, S7ClassRefusal, S7ClassRefusalReason, TopLevelFact, TopLevelShape,
+    CallArgument, CallArgumentValue, CallCallee, CallFact, S7ClassAnalysis, S7ClassFact,
+    S7ClassRefusal, S7ClassRefusalReason, TopLevelFact, TopLevelShape,
 };
 pub(super) use top_level::{nested_call_facts, top_level_facts};

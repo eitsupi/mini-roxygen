@@ -217,10 +217,14 @@ pub(crate) fn build(
     };
     let mut builder = OriginBuilder::new();
     builder.append_nodes(render_header(topic, sources));
-    let inferred_doc_type = match topic.kind {
-        crate::model::RdTopicKind::Package => Some("package"),
-        crate::model::RdTopicKind::Data => Some("data"),
-        crate::model::RdTopicKind::Ordinary => None,
+    let inferred_doc_type = if topic.doc_type_suppressed.is_some() {
+        None
+    } else {
+        match topic.kind {
+            crate::model::RdTopicKind::Package => Some("package"),
+            crate::model::RdTopicKind::Data => Some("data"),
+            crate::model::RdTopicKind::Ordinary => None,
+        }
     };
     if topic.doc_type.is_some() || inferred_doc_type.is_some() {
         let doc_type_text = builder.text_child(topic.doc_type.as_ref().map_or_else(

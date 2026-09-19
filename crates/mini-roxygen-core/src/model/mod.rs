@@ -40,7 +40,6 @@ pub(in crate::model) use lookup::{
     first_name, first_order, first_rdname, has_no_rd, suppresses_default_aliases,
 };
 pub(in crate::model) use slots::{
-    DuplicateSlotKind, emit_duplicate, emit_duplicate_method, set_field, set_tag,
-    set_tag_deduplicate_equal,
+    DuplicateSlotKind, emit_duplicate, emit_duplicate_method, set_doc_type, set_field, set_tag,
 };
 pub(in crate::model) use usage::{resolve_explicit_usage, resolve_formal_names, resolve_usage};

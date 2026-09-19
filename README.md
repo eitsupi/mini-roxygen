@@ -56,7 +56,7 @@ guaranteed.
 | Inline `` `r ` `` expressions                 | Partial (substitutions are configurable)             |
 | Data objects                                  | Partial (no generated `@format`)                     |
 | Repeated scalar tags                          | Partial (one value per topic, no concatenation)      |
-| R6                                            | Partial (documented static `R6Class` assignments)    |
+| R6                                            | Partial (documented static value assignments)        |
 | `@eval`, `@template`, `@includeRmd`, `\Sexpr` | Not supported                                        |
 
 [Compatibility with roxygen2](#compatibility-with-roxygen2) explains each
@@ -196,7 +196,7 @@ options that supply the paths.
 
 ### One value per field
 
-Each scalar prose field can have only one value per topic, including `@docType`,
+Each scalar prose field can have only one value per topic, including
 `@seealso`, `@references`, `@note`, and `@author`. This is a compatibility boundary:
 implicit concatenation across repeated tags is not performed.
 
@@ -204,8 +204,6 @@ Put related entries in one Markdown body, usually a paragraph or a Markdown
 list, instead of repeating the tag. The same rule applies when blocks are
 merged with `@rdname`. A repeated valid value produces a source-aware
 `DuplicateTag` error, and the first value is retained while diagnostics are collected.
-Equal `@docType` values from blocks merged by `@rdname` are deduplicated;
-different values remain an explicit conflict.
 Empty or invalid tags are reported as parse diagnostics and do not
 consume the slot. `@seealso NULL` suppresses package fallback documentation.
 It does not erase an explicit value from another block.
@@ -213,6 +211,12 @@ It does not erase an explicit value from another block.
 `@examples` and `@examplesIf` share one topic-wide slot and are likewise not
 concatenated. When an examples section needs multiple parts or conditions, put
 them in one body with blank lines, comments, or an explicit R `if` statement.
+
+`@docType` is a typed topic directive. `@docType NULL` suppresses inferred
+ordinary/data/package output; explicit values take precedence over suppression.
+Equal explicit values merged by `@rdname` are deduplicated, while conflicting
+values remain source-aware errors. A duplicate within one block is still an
+error.
 
 ### Static subsets
 
@@ -313,10 +317,12 @@ the omission is visible rather than silent. The tags listed under
 `@noMd` is diagnosed because Markdown is always enabled. `@md` is accepted only
 as a redundant declaration of that mode.
 
-`@include` accepts package-local `.R` filenames and validates that each target
-exists in the registered source set. It does not reorder sources or rewrite
-DESCRIPTION `Collate`. Static manual R6 topics recognize direct assignments to
-`R6::R6Class`; bare `R6Class` requires a package-wide static import.
+`@include` accepts one or more case-sensitive `.R` or `.r` filenames from the
+package `R/` directory, validates that each direct source exists, and does not
+generate source ordering or DESCRIPTION `Collate` changes. Direct assignments
+are handled by the general static value-assignment model: constructors and
+bodies are not evaluated, and inline R6 methods, fields, inheritance, and
+member sections are not generated automatically.
 
 Block quotes, thematic breaks, raw HTML, and other unsupported Markdown
 constructs are diagnosed with source locations and recovered where possible.

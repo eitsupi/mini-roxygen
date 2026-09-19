@@ -175,6 +175,8 @@ pub struct ResolvedRdTopic {
     pub kind: crate::model::RdTopicKind,
     /// The explicit documentation type, when supplied by `@docType`.
     pub doc_type: Option<crate::tags::TagValue<crate::tags::DocType>>,
+    /// The origin of an explicit `@docType NULL` suppression, when present.
+    pub doc_type_suppressed: Option<crate::tags::TagOrigin>,
     /// Source span that established the package/data kind, when applicable.
     pub kind_origin: Option<Span>,
     /// Whether the topic had incompatible package/data contributions.

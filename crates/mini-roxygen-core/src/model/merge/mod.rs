@@ -9,9 +9,7 @@ use std::path::Path;
 use crate::arity_adapter::RName;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, Label};
 use crate::package::PackageMetadata;
-use crate::r_parse::{
-    AssociationRefusal, BindingFact, BlockTarget, r6_class_analysis, r6_class_span,
-};
+use crate::r_parse::{AssociationRefusal, BindingFact, BlockTarget};
 use crate::s3_register::S3RegistrationFact;
 use crate::source::{SourceMap, Span};
 use crate::tags::{ParsedTag, TagOrigin};
@@ -122,15 +120,9 @@ fn build_package_model_inner(
     let mut alias_owners: BTreeMap<String, (TopicKey, Span)> = BTreeMap::new();
     let mut method_claims: BTreeMap<(TopicKey, String, String), TagOrigin> = BTreeMap::new();
     let mut package_fallback_states = package::PackageFallbackStates::default();
-    let bare_r6_import = has_bare_r6_import(blocks);
-
     for block_ref in blocks.iter() {
         let implicit_object = implicit_object_name(&block_ref.target);
         validate_includes(sources, block_ref, &mut diagnostics);
-        let unproven_bare_r6 = matches!(
-            r6_class_analysis(&block_ref.target),
-            Some(crate::arity_adapter::R6ClassAnalysis::Bare)
-        ) && !bare_r6_import;
         let explicit_method = block_ref.tags.iter().find_map(|tag| match tag {
             ParsedTag::Method {
                 generic,
@@ -181,22 +173,6 @@ fn build_package_model_inner(
             continue;
         }
         if !is_package && !block::needs_doc(&block_ref.tags) {
-            continue;
-        }
-        if unproven_bare_r6
-            && first_name(&block_ref.tags).is_none()
-            && first_rdname(&block_ref.tags).is_none()
-        {
-            let span = r6_class_span(&block_ref.target).unwrap_or(block_ref.block_span);
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::UnresolvedR6Generator.default_severity(),
-                    DiagnosticCode::UnresolvedR6Generator,
-                    "bare R6Class assignment has no package-wide import evidence",
-                    Label::new(span, "manual R6 generator is unresolved"),
-                )
-                .with_help("qualify the call as R6::R6Class or add @importFrom R6 R6Class"),
-            );
             continue;
         }
         if block::is_function_target(&block_ref.target)
@@ -459,23 +435,6 @@ fn build_package_model_inner(
     }
 }
 
-fn has_bare_r6_import(blocks: &[DocumentedBlock]) -> bool {
-    blocks.iter().any(|block| {
-        block.tags.iter().any(|tag| match tag {
-            ParsedTag::Namespace(crate::tags::NamespaceTag::Import(value)) => value
-                .value
-                .as_str()
-                .split_whitespace()
-                .any(|word| word == "R6"),
-            ParsedTag::Namespace(crate::tags::NamespaceTag::ImportFrom(value)) => {
-                let mut words = value.value.as_str().split_whitespace();
-                words.next() == Some("R6") && words.any(|word| word == "R6Class")
-            }
-            _ => false,
-        })
-    })
-}
-
 fn validate_includes(sources: &SourceMap, block: &DocumentedBlock, diagnostics: &mut Diagnostics) {
     for tag in &block.tags {
         let ParsedTag::Include(value) = tag else {
@@ -485,7 +444,9 @@ fn validate_includes(sources: &SourceMap, block: &DocumentedBlock, diagnostics: 
             let found = sources.r_file_ids().any(|file_id| {
                 sources.get(file_id).is_some_and(|source| {
                     let path = source.path();
-                    let direct_r_file = path.parent().is_none_or(|parent| parent == Path::new("R"));
+                    let direct_r_file = path.parent().is_none_or(|parent| {
+                        parent.as_os_str().is_empty() || parent == Path::new("R")
+                    });
                     direct_r_file && path.file_name() == Some(std::ffi::OsStr::new(&file.value))
                 })
             });

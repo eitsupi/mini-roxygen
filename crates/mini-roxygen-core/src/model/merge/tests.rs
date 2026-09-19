@@ -836,6 +836,92 @@ second <- function() second
 }
 
 #[test]
+fn doc_type_suppression_is_order_independent_and_block_local() {
+    for source in [
+        r#"#' Shared topic
+#' @rdname shared
+#' @docType NULL
+first <- function() first
+
+#' @rdname shared
+#' @docType class
+second <- function() second
+"#,
+        r#"#' Shared topic
+#' @rdname shared
+#' @docType class
+first <- function() first
+
+#' @rdname shared
+#' @docType NULL
+second <- function() second
+"#,
+    ] {
+        let output = model(source);
+        let topic = &output.package.topics[&TopicKey("shared".into())];
+        assert_eq!(
+            topic
+                .doc_type
+                .as_ref()
+                .expect("explicit docType")
+                .value
+                .as_str(),
+            "class"
+        );
+        assert!(topic.doc_type_suppressed.is_none());
+        assert!(output.diagnostics.is_empty());
+    }
+
+    let output = model(
+        r#"#' Suppressed topic
+#' @docType NULL
+first <- function() first
+"#,
+    );
+    let topic = &output.package.topics[&TopicKey("first".into())];
+    assert!(topic.doc_type.is_none());
+    assert!(topic.doc_type_suppressed.is_some());
+
+    let (output, tag_diagnostics) = model_with_tag_diagnostics(
+        r#"#' Duplicate suppression
+#' @docType NULL
+#' @docType class
+first <- function() first
+"#,
+    );
+    assert!(
+        output.package.topics[&TopicKey("first".into())]
+            .doc_type_suppressed
+            .is_some()
+    );
+    assert!(tag_diagnostics.is_empty());
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == DiagnosticCode::DuplicateTag)
+            .count(),
+        1
+    );
+
+    let package = package_model_with_description(
+        r#"#' Package title
+#' @docType NULL
+"_PACKAGE"
+"#,
+        &package_description("person('Package Author', 'a@example.org')"),
+    );
+    let package_topic = package
+        .package
+        .topics
+        .values()
+        .find(|topic| matches!(topic.kind, super::RdTopicKind::Package))
+        .expect("package topic");
+    assert!(package_topic.doc_type.is_none());
+    assert!(package_topic.doc_type_suppressed.is_some());
+}
+
+#[test]
 fn include_targets_are_checked_against_registered_r_sources() {
     let output = model(
         r#"#' Included class
@@ -853,62 +939,21 @@ Widget <- R6Class("Ignored")
 }
 
 #[test]
-fn bare_r6_generators_require_package_wide_import_evidence() {
-    let without_import = model(
-        r#"#' Bare generator
-Widget <- R6Class("Ignored")
-"#,
-    );
-    assert!(without_import.package.topics.is_empty());
-    let diagnostic = without_import
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == DiagnosticCode::UnresolvedR6Generator)
-        .expect("unresolved bare generator diagnostic");
-    assert!(
-        diagnostic
-            .help
-            .as_deref()
-            .is_some_and(|help| help.contains("R6::R6Class"))
-    );
+fn local_r6class_function_call_is_an_ordinary_manual_value_topic() {
+    let output = model(
+        r#"R6Class <- function(...) list(...)
 
-    let with_import = model(
-        r#"#' @importFrom R6 R6Class
-#' @title Bare generator
+#' Manual value topic
 Widget <- R6Class("Ignored")
 "#,
     );
     assert!(
-        with_import
+        output
             .package
             .topics
             .contains_key(&TopicKey("Widget".into()))
     );
-
-    let explicit = model(
-        r#"#' Explicit generator
-Widget <- R6::R6Class("Ignored")
-"#,
-    );
-    assert!(
-        explicit
-            .package
-            .topics
-            .contains_key(&TopicKey("Widget".into()))
-    );
-
-    let recovered = model(
-        r#"#' Explicit manual topic
-#' @name Recovered
-Widget <- R6Class("Ignored")
-"#,
-    );
-    assert!(
-        recovered
-            .package
-            .topics
-            .contains_key(&TopicKey("Recovered".into()))
-    );
+    assert!(output.diagnostics.is_empty());
 }
 
 #[test]
@@ -930,6 +975,51 @@ main <- function() NULL
             .iter()
             .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
     );
+}
+
+#[test]
+fn include_accepts_direct_and_r_directory_source_paths() {
+    for included_path in ["foo.R", "R/foo.R"] {
+        let mut sources = SourceMap::new();
+        let _ = blocks(&mut sources, included_path, "helper <- function() NULL\n");
+        let documentation = blocks(
+            &mut sources,
+            "R/main.R",
+            r#"#' Main topic
+#' @include foo.R
+main <- function() NULL
+"#,
+        );
+        let output = build_package_model(&sources, documentation);
+        assert!(
+            !output
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        );
+    }
+}
+
+#[test]
+fn include_validates_each_filename_with_case_sensitive_matching() {
+    let mut sources = SourceMap::new();
+    let _ = blocks(&mut sources, "R/present.R", "helper <- function() NULL\n");
+    let documentation = blocks(
+        &mut sources,
+        "R/main.R",
+        r#"#' Main topic
+#' @include present.R present.r
+main <- function() NULL
+"#,
+    );
+    let output = build_package_model(&sources, documentation);
+    let missing = output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == DiagnosticCode::MissingIncludedFile)
+        .collect::<Vec<_>>();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].primary.message, "included R file is missing");
 }
 
 #[test]
