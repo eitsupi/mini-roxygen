@@ -5,10 +5,10 @@
       "resolved": "ghcr.io/devcontainers/features/rust@sha256:846c949f52c9dea98d4f90a11957cbf152fb3f6e8a70ddd7cb83014a7d1d0c98",
       "integrity": "sha256:846c949f52c9dea98d4f90a11957cbf152fb3f6e8a70ddd7cb83014a7d1d0c98"
     },
-    "ghcr.io/rocker-org/devcontainer-features/r-rig:1": {
-      "version": "1.2.4",
-      "resolved": "ghcr.io/rocker-org/devcontainer-features/r-rig@sha256:38f14bb238ee5e9ced77a4fe9375c459ca30fe32bd138480ed5eba62e1af4db2",
-      "integrity": "sha256:38f14bb238ee5e9ced77a4fe9375c459ca30fe32bd138480ed5eba62e1af4db2"
+    "ghcr.io/rocker-org/devcontainer-features/r-rig:2": {
+      "version": "2.0.0",
+      "resolved": "ghcr.io/rocker-org/devcontainer-features/r-rig@sha256:b25f0b00b2b277158bc7fa7c22ef8f0850ddf9ddf3999ea46aae25a6d4d9d612",
+      "integrity": "sha256:b25f0b00b2b277158bc7fa7c22ef8f0850ddf9ddf3999ea46aae25a6d4d9d612"
     }
   }
 }
