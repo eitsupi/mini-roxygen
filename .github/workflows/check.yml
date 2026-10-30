@@ -67,7 +67,7 @@ jobs:
       - name: Set up Rust stable
         run: rustup toolchain install stable --profile minimal --component clippy
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
@@ -90,7 +90,7 @@ jobs:
       - name: Set up Rust stable
         run: rustup toolchain install stable --profile minimal
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run tests
         run: cargo test --workspace --all-targets --all-features --locked
 
@@ -110,7 +110,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install cargo-msrv
         uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
         with:
@@ -165,7 +165,7 @@ jobs:
       - name: Set up Rust stable
         run: rustup toolchain install stable --profile minimal
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run required R oracles
         env:
           MINI_ROXYGEN_REQUIRE_RD_ORACLE: '1'
@@ -186,7 +186,7 @@ jobs:
       - name: Set up Rust stable
         run: rustup toolchain install stable --profile minimal
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
